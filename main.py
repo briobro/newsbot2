@@ -76,12 +76,19 @@ def _apply_secret_config():
 평일슬롯 = [(8, 0), (13, 30), (17, 30)]
 마스터슬롯 = [(22, 0)]
 주말발송 = False
+공휴일휴무 = True
+양력공휴일 = ['0101', '0301', '0505', '0606', '0815', '1003', '1009', '1225']
+공휴일자동 = True
+_HOLI_CACHE = set()
+조용한시간_무음 = True
+야간시작 = 22
+야간끝 = 8
 주간시작 = '07:00'
 주간종료 = '23:00'
 검색간격시간 = 0.5
 속보허용 = True
 심야속보 = True
-보고안내 = '평일(월~금) 08:00·13:30·17:30 KST · 중대 속보는 즉시'
+보고안내 = '평일(공휴일 제외) 08:00·13:30·17:30 KST · 중대 속보는 즉시'
 키워드자동최신화 = True
 자동키워드최대 = 20
 키워드갱신주기시간 = 24
@@ -148,7 +155,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'last_summary': d.get('last_summary', ''), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'last_summary': d.get('last_summary', ''), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -172,6 +179,8 @@ def save_state(state):
         open(STATE_FILE, 'w', encoding='utf-8').write(data)
 
 def _post_one(chat, text, silent=False):
+    if _quiet_now():
+        silent = True
     url = f'https://api.telegram.org/bot{TG_TOKEN}/sendMessage'
     r = requests.post(url, json={'chat_id': chat, 'text': text, 'parse_mode': 'HTML', 'disable_web_page_preview': True, 'disable_notification': silent}, timeout=30)
     if r.status_code == 400:
@@ -189,9 +198,26 @@ def register_commands(state):
     except Exception as ex:
         print('명령 메뉴 등록 실패(무시 가능):', ex)
 
+def _quiet_now():
+    if not 조용한시간_무음:
+        return False
+    k = now_utc() + datetime.timedelta(hours=9)
+    if k.weekday() >= 5:
+        return True
+    if 공휴일휴무 and k.strftime('%m%d') in 양력공휴일:
+        return True
+    if 공휴일휴무 and k.strftime('%Y%m%d') in _HOLI_CACHE:
+        return True
+    h = k.hour
+    if 야간시작 <= 야간끝:
+        return 야간시작 <= h < 야간끝
+    return h >= 야간시작 or h < 야간끝
+
 def deliver(targets, text, silent=False):
     if len(text) > TG_LIMIT:
         text = text[:TG_LIMIT]
+    if _quiet_now():
+        silent = True
     for chat in targets:
         try:
             _post_one(chat, text, silent=silent)
@@ -1092,6 +1118,38 @@ def _active(state, ids):
         out.append(c)
     return out
 
+def _is_holiday(state=None):
+    global _HOLI_CACHE
+    if not 공휴일휴무:
+        return False
+    k = now_utc() + datetime.timedelta(hours=9)
+    if k.strftime('%m%d') in 양력공휴일:
+        return True
+    if not (공휴일자동 and state is not None):
+        return False
+    key = os.environ.get('HOLIDAY_KEY', '').strip()
+    if not key:
+        return False
+    ym = k.strftime('%Y%m')
+    cache = state.get('holiday_cache', {})
+    if cache.get('ym') != ym:
+        days = []
+        try:
+            r = requests.get('http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo', params={'serviceKey': key, 'solYear': k.strftime('%Y'), 'solMonth': k.strftime('%m'), 'numOfRows': 50, '_type': 'json'}, timeout=20)
+            items = (((r.json().get('response', {}) or {}).get('body', {}) or {}).get('items', {}) or {}).get('item', [])
+            if isinstance(items, dict):
+                items = [items]
+            for it in items:
+                if str(it.get('isHoliday', '')).upper() == 'Y':
+                    days.append(str(it.get('locdate', '')))
+        except Exception as ex:
+            print('공휴일 조회 실패(양력만 적용):', str(ex)[:80])
+            return False
+        cache = {'ym': ym, 'days': days}
+        state['holiday_cache'] = cache
+    _HOLI_CACHE = set(cache.get('days', []))
+    return k.strftime('%Y%m%d') in _HOLI_CACHE
+
 def is_paused(state):
     if not state.get('paused_until'):
         return False
@@ -1177,8 +1235,10 @@ def run_digest_tiers(state, items, stat, send_all):
     state['last_summary'] = digest[:3000]
     return len(items)
 
-def _due_slot(now_kst, last_key, slots):
+def _due_slot(now_kst, last_key, slots, state=None):
     if now_kst.weekday() >= 5 and (not 주말발송):
+        return None
+    if _is_holiday(state):
         return None
     cur = now_kst.hour * 60 + now_kst.minute
     passed = [hm for hm in slots if hm[0] * 60 + hm[1] <= cur]
@@ -1262,8 +1322,8 @@ def main():
         print('검색 주기 아님 - 대기')
         save_state(state)
         return
-    due_all = _due_slot(now_kst, state.get('last_slot_all', ''), 평일슬롯)
-    due_master = _due_slot(now_kst, state.get('last_slot_master', ''), 마스터슬롯)
+    due_all = _due_slot(now_kst, state.get('last_slot_all', ''), 평일슬롯, state)
+    due_master = _due_slot(now_kst, state.get('last_slot_master', ''), 마스터슬롯, state)
     due_slot = due_all or due_master
     inwin = _in_window(now_kst)
     is_digest = bool(force or due_slot)
