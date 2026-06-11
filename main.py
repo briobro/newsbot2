@@ -20,6 +20,9 @@ except Exception:
 일본어검색어목록 = []
 RSSHUB = 'https://rsshub.app'
 소셜RSS목록 = []
+텔레채널 = []
+웨이보계정 = []
+웨이보검색어 = []
 
 def _apply_secret_config():
     raw = os.environ.get('SECRET_CONFIG', '').strip()
@@ -32,7 +35,7 @@ def _apply_secret_config():
         print('SECRET_CONFIG 해석 실패(JSON 오류) → 기본값 사용:', ex)
         return
     g = globals()
-    for key, var in [('ko', '검색어목록'), ('zh', '중국어검색어목록'), ('ru', '러시아어검색어목록'), ('ja', '일본어검색어목록'), ('sns', '소셜RSS목록')]:
+    for key, var in [('ko', '검색어목록'), ('zh', '중국어검색어목록'), ('ru', '러시아어검색어목록'), ('ja', '일본어검색어목록'), ('sns', '소셜RSS목록'), ('tg', '텔레채널'), ('wb', '웨이보계정'), ('wb_kw', '웨이보검색어')]:
         v = cfg.get(key)
         if isinstance(v, list) and v:
             g[var] = [str(x) for x in v]
@@ -439,7 +442,7 @@ def _maybe_learn_sources(state):
         except Exception:
             pass
     state['auto_src_updated'] = now_utc().isoformat()
-    fixed = set(추가RSS목록) | set(소셜RSS목록)
+    fixed = set(추가RSS목록) | set(소셜RSS목록) | {f'tg:{c}' for c in 텔레채널} | {f'wb:{u}' for u in 웨이보계정}
     auto = list(state.get('auto_sources', []))
     alive, dropped = ([], [])
     for u in auto:
@@ -595,6 +598,74 @@ def _maybe_comtrade(state):
         print('Comtrade: 최근 가용 월 데이터를 못 찾음')
     except Exception as ex:
         print('Comtrade 조회 실패:', ex)
+_TG_WRAP = re.compile('<div class="tgme_widget_message_wrap.*?(?=<div class="tgme_widget_message_wrap|<div class="tgme_channel_history)', re.S)
+_TG_BUBBLE = re.compile('tgme_widget_message_bubble.*', re.S)
+_TG_TEXT = re.compile('<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>\\s*(?:<div class="tgme_widget_message_(?:footer|info|reply)|$)', re.S)
+_TG_TEXT_SIMPLE = re.compile('<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', re.S)
+_TG_TIME = re.compile('<a class="tgme_widget_message_date"[^>]*href="([^"]+)".*?datetime="([^"]+)"', re.S)
+
+def fetch_telegram(channel, limit):
+    out = []
+    try:
+        url = f'https://t.me/s/{channel.lstrip('@')}'
+        r = requests.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
+        if r.status_code != 200:
+            return out
+        wraps = _TG_WRAP.findall(r.text)
+        for w in wraps[-limit:]:
+            bub = _TG_BUBBLE.search(w)
+            seg = bub.group(0) if bub else w
+            m = _TG_TEXT.search(seg) or _TG_TEXT_SIMPLE.search(seg)
+            if not m:
+                continue
+            txt = _clean(m.group(1))
+            if not txt or len(txt) < 4:
+                continue
+            link, pub = (url, None)
+            tm = _TG_TIME.search(w)
+            if tm:
+                link = tm.group(1)
+                try:
+                    pub = datetime.datetime.fromisoformat(tm.group(2).replace('Z', '+00:00')).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                except Exception:
+                    pub = None
+            out.append({'title': txt[:200], 'link': link, 'source': f'TG:{channel}', 'pub': pub, 'seed': txt[:300]})
+    except Exception as ex:
+        print(f'텔레그램 수집 실패({channel}):', str(ex)[:80])
+    return out
+
+def fetch_weibo(uid=None, keyword=None, limit=10):
+    out = []
+    try:
+        h = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)', 'Referer': 'https://m.weibo.cn/'}
+        if keyword:
+            url = 'https://m.weibo.cn/api/container/getIndex'
+            params = {'containerid': f'100103type=1&q={keyword}', 'page_type': 'searchall'}
+        else:
+            url = 'https://m.weibo.cn/api/container/getIndex'
+            params = {'type': 'uid', 'value': uid, 'containerid': f'107603{uid}'}
+        r = requests.get(url, params=params, headers=h, timeout=20)
+        cards = (r.json().get('data', {}) or {}).get('cards', []) or []
+        for c in cards:
+            mb = c.get('mblog') or (c.get('card_group', [{}])[0].get('mblog') if c.get('card_group') else None)
+            if not mb:
+                continue
+            txt = _clean(mb.get('text', ''))
+            if not txt:
+                continue
+            mid = mb.get('id', '')
+            tag = f'WB:{keyword}' if keyword else f'WB:{uid}'
+            pub = None
+            try:
+                pub = parsedate_to_datetime(mb.get('created_at', '')).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            except Exception:
+                pub = None
+            out.append({'title': txt[:200], 'link': f'https://m.weibo.cn/status/{mid}', 'source': tag, 'pub': pub, 'seed': txt[:300]})
+            if len(out) >= limit:
+                break
+    except Exception as ex:
+        print(f'웨이보 수집 실패({uid or keyword}):', str(ex)[:80])
+    return out
 
 def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
     days = max(1, (시간범위 + 23) // 24)
@@ -608,6 +679,12 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
             jobs.append(('rss', lambda rss=rss: _rss_items(rss, 출처당최대)))
         for s in 소셜RSS목록:
             jobs.append(('sns', lambda s=s: _rss_items(s, 출처당최대)))
+        for ch in 텔레채널:
+            jobs.append(('sns', lambda ch=ch: fetch_telegram(ch, 출처당최대)))
+        for uid in 웨이보계정:
+            jobs.append(('sns', lambda uid=uid: fetch_weibo(uid=uid, limit=출처당최대)))
+        for kw in 웨이보검색어:
+            jobs.append(('sns', lambda kw=kw: fetch_weibo(keyword=kw, limit=출처당최대)))
         if 중국검색:
             for t in 중국어검색어목록:
                 jobs.append(('zh', lambda t=t: search_news(t, 'zh', days, 출처당최대)))
