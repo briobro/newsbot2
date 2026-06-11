@@ -1,0 +1,47 @@
+name: news-digest
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 15분마다 (공개 저장소 = 분 무제한이라 가능. 명령 응답도 빨라짐)
+  workflow_dispatch: {}      # 'Run workflow' 수동 실행
+
+permissions:
+  contents: write
+
+concurrency:
+  group: news-digest
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20      # 멈춘 실행이 다음 실행을 막지 않도록
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run digest
+        env:
+          TELEGRAM_TOKEN:      ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
+          NAVER_CLIENT_ID:     ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          SECRET_CONFIG:       ${{ secrets.SECRET_CONFIG }}
+          FORCE_DIGEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+        run: python main.py
+
+      - name: Save seen state
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add seen.json
+          git commit -m "update state [skip ci]" || echo "변경 없음"
+          git pull --rebase --autostash origin main || true
+          git push || true
