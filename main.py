@@ -44,6 +44,12 @@ except Exception:
     "https://keia.org/feed/",                                   # KEI 한미경제연구소
     "https://sinonk.com/feed/",                                 # Sino-NK: 북중 관계 전문
     "https://thediplomat.com/feed/",                            # The Diplomat: 아태 안보
+    # 추가 북한 전문(미 정부발·내부소식통·니치) — 구글뉴스 site: RSS로 안정 수신
+    "https://news.google.com/rss/search?q=site:voakorea.com&hl=ko&gl=KR&ceid=KR:ko",    # VOA 한국어(미국 정부발 대북 단독 많음)
+    "https://news.google.com/rss/search?q=site:asiapress.org&hl=ko&gl=KR&ceid=KR:ko",   # 아시아프레스/임진강(북한 내부 취재망)
+    "https://www.dailynk.com/feed/",                                                    # Daily NK 한국어판(영문판과 별도 기사)
+    "https://news.google.com/rss/search?q=site:nkeconomy.com&hl=ko&gl=KR&ceid=KR:ko",   # NK경제(북 IT·산업·기업 니치)
+    "https://news.google.com/rss/search?q=site:spnews.co.kr&hl=ko&gl=KR&ceid=KR:ko",    # 서울평양뉴스(남북 경협·교류 전문)
     # 전 세계 65개 언어 뉴스 그물 (무료, 키 없음) — 변방 매체까지 훑음
 ]
 
@@ -1020,8 +1026,8 @@ def summarize(topic, items, prev_summary=""):
     base = 명령.replace("{주제}", topic).replace("{목록}", "\n\n".join(blocks))
     if prev_summary:
         base = ("아래 [이전 보고]는 직전에 이미 보낸 브리핑이다. 반드시 지켜라:\n"
-                "1) 이전 보고에서 이미 다룬 사안은 반복하지 마라. 그 사안은 '새 전개·진전·수치 변화'가 있을 때만, 바뀐 부분만 짧게.\n"
-                "2) 이전 보고 '이후' 새로 등장했거나 달라진 것에 집중하라. 똑같은 큰 뉴스를 또 길게 풀지 마라.\n"
+                "1) 이전 보고에서 이미 다룬 사안은 ★원칙적으로 생략★하라. 중대한 새 전개가 있을 때만 맨 끝에 '(갱신)' 표시로 딱 한 줄. 두 줄 이상 쓰면 실패다.\n"
+                "2) 지면은 이전 보고 '이후' 새로 등장한 것에만 써라. 같은 사건 재정리 금지.\n"
                 "3) 이전과 견줘 의미 있는 새 내용이 사실상 없으면, 설명 없이 정확히 'NO_UPDATE' 한 단어만 출력하라.\n\n"
                 f"[이전 보고]\n{prev_summary}\n\n--------\n\n" + base)
     # 강한 모델(2.5 Pro)부터, 한도/실패면 Gemini가 알아서 낮은 모델로 자동 강등
@@ -1115,14 +1121,15 @@ def build_messages(topic, items, digest, stat=None, prefix="", lead=None):
     links = [line(i, it) for i, it in enumerate(items)][:링크표시최대]
     linkblock = ("\n\n📎 <b>주요 최신 자료</b> (괄호=보도 시각, KST)\n" + "\n".join(links)) if links else ""
 
-    # 취재·조사 지침을 경계로 분리
+    # 순서: 자료(링크) 먼저 → 단신·접경 → [취재지침]을 맨 마지막에 (텔레그램에선 마지막 메시지가 바로 보임)
     idx = digest.find("[취재")
     if idx > 0:
-        parts = [head + _fmt(digest[:idx].rstrip()),
-                 _fmt(digest[idx:].strip())]
+        parts = [head + (linkblock.lstrip("\n") if linkblock else "(링크 없음)"),
+                 _fmt(digest[:idx].rstrip()),
+                 _fmt(digest[idx:].strip()) + COMMAND_HELP]
     else:
-        parts = [head + _fmt(digest)]
-    parts[-1] = parts[-1] + linkblock + COMMAND_HELP   # 링크·안내는 마지막 메시지에
+        parts = [head + (linkblock.lstrip("\n") if linkblock else ""),
+                 _fmt(digest) + COMMAND_HELP]
 
     chunks = []
     for L in (lead or []):           # 맨 앞에 붙일 메시지(예: 키워드 목록)
