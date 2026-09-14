@@ -42,6 +42,9 @@ def _apply_secret_config():
     st_ = cfg.get('san_tokens')
     if isinstance(st_, list) and st_:
         g['제재토큰'] = [str(x).lower() for x in st_]
+    ic = cfg.get('invite_code')
+    if isinstance(ic, str) and ic.strip():
+        g['초대코드'] = ic.strip()
     t = cfg.get('title')
     if isinstance(t, str) and t.strip():
         g['표시제목'] = t.strip()
@@ -137,7 +140,7 @@ MAX_PROMPT = 220000
 TG_LIMIT = 4096
 UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 COMMAND_HELP = '\n\n⏱ 정기 보고: {보고안내}\n🛠 명령: /보고 · /일시중지 · /재개 · /요약 ○○ · /검색어 · /도움말'.replace('{보고안내}', 보고안내)
-HELP_TEXT = f'🛠 <b>명령 안내</b>\n/보고 — 지금 바로 브리핑 받기\n/요약 ○○ — 특정 주제만 찾아 정리 (예: /요약 ○○ 동향)\n/일시중지 [이틀·사흘·일주일] — 정기 알림 멈춤\n/재개 — 다시 시작\n/검색어 — 자동 추가된 검색어 보기\n/검색어삭제 ○○ — 자동 검색어에서 빼기\n/확인 — 봇 응답·상태 확인\n/도움말 — 이 안내\n\n정기 보고: {보고안내}\n※ 한글 명령(/일시중지 등)은 그대로 입력하면 동작해요. 텔레그램 자동완성 메뉴(/)에는 규칙상 영문 별칭(/report·/pause·/resume·/keywords·/help)만 떠요 — 둘 다 됩니다.'
+HELP_TEXT = f"🛠 <b>명령 안내</b>\n/보고 — 지금 바로 브리핑 받기\n/요약 ○○ — 특정 주제만 찾아 정리 (예: /요약 ○○ 동향)\n/일시중지 [이틀·사흘·일주일] — 정기 알림 멈춤\n/재개 — 다시 시작\n/검색어 — 자동 추가된 검색어 보기\n/검색어삭제 ○○ — 자동 검색어에서 빼기\n/확인 — 봇 응답·상태 확인\n/수신자 — 받는 사람 명단\n/승인 ID · /거절 ID · /추가 ID · /수신삭제 ID — 수신자 관리\n/도움말 — 이 안내\n(새 사람은 봇에게 '/구독'을 보내면 승인 요청이 와요)\n\n정기 보고: {보고안내}\n※ 한글 명령(/일시중지 등)은 그대로 입력하면 동작해요. 텔레그램 자동완성 메뉴(/)에는 규칙상 영문 별칭(/report·/pause·/resume·/keywords·/help)만 떠요 — 둘 다 됩니다."
 TG_TOKEN = os.environ.get('TELEGRAM_TOKEN', '').strip()
 TG_TOKEN_SHORT = os.environ.get('TELEGRAM_TOKEN_SHORT', '').strip()
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
@@ -145,8 +148,10 @@ GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 def _ids(name):
     return [c.strip() for c in os.environ.get(name, '').split(',') if c.strip()]
 MASTERS = _ids('TELEGRAM_CHAT_ID_MASTER')
-NORMALS = _ids('TELEGRAM_CHAT_ID_NORMAL')
+ENV_NORMALS = _ids('TELEGRAM_CHAT_ID_NORMAL')
+NORMALS = list(ENV_NORMALS)
 SUBS = _ids('TELEGRAM_CHAT_ID_SUB')
+초대코드 = ''
 OWNER = MASTERS[0] if MASTERS else ''
 TG_CHATS = MASTERS
 NAVER_ID = os.environ.get('NAVER_CLIENT_ID', '').strip()
@@ -158,7 +163,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -200,12 +205,12 @@ def _post_one(chat, text, silent=False, plain=False, urgent=False, token=None):
         raise RuntimeError(f'{r.status_code} {desc}')
 
 def register_commands(state):
-    if state.get('bot_cmds_v') == '3':
+    if state.get('bot_cmds_v') == '4':
         return
     cmds = [{'command': 'report', 'description': '지금 브리핑 받기'}, {'command': 'summary', 'description': '특정 주제 정리 (예: /summary 환율)'}, {'command': 'pause', 'description': '정기 알림 멈춤'}, {'command': 'resume', 'description': '다시 시작'}, {'command': 'keywords', 'description': '자동 검색어 보기'}, {'command': 'help', 'description': '명령 안내'}]
     try:
         requests.post(f'https://api.telegram.org/bot{TG_TOKEN}/setMyCommands', json={'commands': cmds}, timeout=15)
-        state['bot_cmds_v'] = '3'
+        state['bot_cmds_v'] = '4'
     except Exception as ex:
         print('명령 메뉴 등록 실패(무시 가능):', ex)
 
@@ -249,8 +254,7 @@ def _ensure_polling(state):
     state['webhook_cleared'] = True
 
 def read_commands(state, long_poll=False):
-    known = set(MASTERS) | set(NORMALS) | set(SUBS)
-    if not known:
+    if not MASTERS:
         return []
     try:
         resp = requests.get(f'https://api.telegram.org/bot{TG_TOKEN}/getUpdates', params={'offset': state['last_update_id'] + 1, 'timeout': 25 if long_poll else 0}, timeout=35)
@@ -275,8 +279,10 @@ def read_commands(state, long_poll=False):
         msg = u.get('message') or u.get('channel_post') or {}
         chat = str(msg.get('chat', {}).get('id', ''))
         text = (msg.get('text') or '').strip()
-        if chat in known and text:
-            out.append((chat, text))
+        frm = msg.get('from', {}) or {}
+        name = (frm.get('first_name') or frm.get('username') or '')[:20]
+        if chat and text and (msg.get('chat', {}).get('type', 'private') == 'private'):
+            out.append((chat, text, name))
     return out
 
 def _clean(s):
@@ -1057,7 +1063,26 @@ def build_messages(topic, items, digest, stat=None, prefix='', lead=None, show_l
 def parse_command(text):
     raw = text.strip()
     t = raw.lstrip('/').replace(' ', '').lower()
-    if any((k in t for k in ['도움말', '사용법', '명령어', 'help', 'start', 'commands'])):
+    if t.startswith('구독') or t.startswith('subscribe') or t == 'start':
+        arg = raw
+        for w in ['/', '구독', 'subscribe', 'start', '신청']:
+            arg = arg.replace(w, ' ')
+        return ('subscribe', arg.strip() or None)
+    if t.startswith('승인') or t.startswith('approve'):
+        ids = re.findall('-?\\d{3,}', raw)
+        return ('approve', ids or None)
+    if t.startswith('거절') or t.startswith('reject'):
+        ids = re.findall('-?\\d{3,}', raw)
+        return ('reject', ids or None)
+    if t.startswith('수신삭제') or t.startswith('수신자삭제') or t.startswith('removeuser'):
+        ids = re.findall('-?\\d{3,}', raw)
+        return ('rm_user', ids or None)
+    if t.startswith('수신자') or t.startswith('명단') or t.startswith('members'):
+        return ('members', None)
+    if t.startswith('추가') or t.startswith('adduser'):
+        ids = re.findall('-?\\d{3,}', raw)
+        return ('add_user', ids or None)
+    if any((k in t for k in ['도움말', '사용법', '명령어', 'help', 'commands'])):
         return ('help', None)
     if t in ('확인', '상태', '살아있니', '핑', 'status', 'ping', 'check', 'alive') or t.startswith('확인') or t.startswith('상태'):
         return ('status', None)
@@ -1094,6 +1119,50 @@ def parse_command(text):
         return ('report_now', None)
     return (None, None)
 
+def _sync_recipients(state):
+    dyn = [str(x) for x in state.get('dyn_normals', [])]
+    merged = list(dict.fromkeys(ENV_NORMALS + dyn))
+    NORMALS[:] = [c for c in merged if c not in MASTERS]
+
+def _add_recipient(state, chat, name=''):
+    dyn = [str(x) for x in state.get('dyn_normals', [])]
+    if str(chat) not in dyn:
+        dyn.append(str(chat))
+    state['dyn_normals'] = dyn
+    names = dict(state.get('recip_names', {}))
+    names[str(chat)] = name or names.get(str(chat), '')
+    state['recip_names'] = names
+    state.setdefault('pending_subs', {}).pop(str(chat), None)
+    _sync_recipients(state)
+
+def _check_chat(chat):
+    try:
+        r = requests.get(f'https://api.telegram.org/bot{TG_TOKEN}/getChat', params={'chat_id': chat}, timeout=10)
+        j = r.json()
+        if j.get('ok'):
+            res = j.get('result', {})
+            nm = res.get('first_name') or res.get('title') or res.get('username') or ''
+            return (True, nm)
+        return (False, j.get('description', ''))
+    except Exception as ex:
+        return (False, str(ex)[:60])
+
+def _members_text(state):
+    names = state.get('recip_names', {})
+
+    def fmt(c):
+        ok, info = _check_chat(c)
+        if ok:
+            return f'✅ {c}' + (f'({info})' if info else '')
+        why = 'Start 안 누름 또는 ID 오류' if 'not found' in info else info
+        return f'❌ {c} — {why}'
+    lines = [f'👑 마스터: {', '.join((fmt(c) for c in MASTERS)) or '-'}', f'👤 노멀(기본): {', '.join((fmt(c) for c in ENV_NORMALS)) or '-'}', f'👤 노멀(승인 추가): {', '.join((fmt(c) for c in state.get('dyn_normals', []))) or '-'}', f'📨 구독자(기본): {', '.join((fmt(c) for c in SUBS)) or '-'}']
+    pend = state.get('pending_subs', {})
+    if pend:
+        lines.append('⏳ 승인 대기: ' + ', '.join((f'{c}({n})' if n else c for c, n in pend.items())))
+    lines.append('명령: /승인 ID · /거절 ID · /추가 ID · /수신삭제 ID')
+    return '\n'.join(lines)
+
 def _status_text(state, is_master):
     k = now_utc() + datetime.timedelta(hours=9)
     base = f'✅ 봇 응답 확인 · {k.strftime('%m-%d %H:%M')} KST'
@@ -1106,10 +1175,28 @@ def _status_text(state, is_master):
 def handle_commands(state, long_poll=False):
     on_demand = []
     report_now = False
-    for chat, text in read_commands(state, long_poll=long_poll):
+    for chat, text, name in read_commands(state, long_poll=long_poll):
         kind, arg = parse_command(text)
+        known = set(MASTERS) | set(NORMALS) | set(SUBS)
+        if chat not in known:
+            if kind == 'subscribe':
+                if 초대코드 and arg and (arg == 초대코드):
+                    _add_recipient(state, chat, name)
+                    deliver([chat], "✅ 구독이 승인됐어요. 이제 요약 보고를 받게 돼요. ('/일시중지'·'/재개' 사용 가능)")
+                    deliver(MASTERS, f'🙋 초대코드로 자동 승인: {name or '-'} ({chat})', silent=True)
+                else:
+                    state.setdefault('pending_subs', {})[chat] = name
+                    deliver([chat], '🙋 구독 요청을 전달했어요. 관리자가 승인하면 알려드릴게요.')
+                    today = (now_utc() + datetime.timedelta(hours=9)).strftime('%Y-%m-%d')
+                    if state.setdefault('sub_notified', {}).get(chat) != today:
+                        deliver(MASTERS, f'🙋 구독 요청: {name or '-'} ({chat})\n승인: /승인 {chat}  · 거절: /거절 {chat}', silent=True)
+                        state['sub_notified'][chat] = today
+            continue
         if kind == 'status':
             deliver([chat], _status_text(state, chat in set(MASTERS)))
+            continue
+        if kind == 'subscribe':
+            deliver([chat], '이미 수신 중이에요.' if chat not in set(MASTERS) else HELP_TEXT)
             continue
         if chat not in set(MASTERS):
             if kind == 'pause':
@@ -1121,7 +1208,38 @@ def handle_commands(state, long_poll=False):
             else:
                 deliver([chat], "이 봇은 '/일시중지'와 '/재개'만 사용할 수 있어요.")
             continue
-        if kind == 'help':
+        if kind in ('approve', 'add_user'):
+            targets = arg or list(state.get('pending_subs', {}).keys())
+            if not targets:
+                deliver([chat], "승인 대기 중인 요청이 없어요. '/추가 ID'로 직접 추가할 수도 있어요.")
+                continue
+            done = []
+            for cid in targets:
+                nm = state.get('pending_subs', {}).get(cid, '')
+                _add_recipient(state, cid, nm)
+                deliver([cid], "✅ 구독이 승인됐어요. 이제 요약 보고를 받게 돼요. ('/일시중지'·'/재개' 사용 가능)")
+                done.append(cid)
+            deliver([chat], f'✅ 등록 완료: {', '.join(done)}\n\n' + _members_text(state))
+        elif kind == 'reject':
+            targets = arg or list(state.get('pending_subs', {}).keys())
+            for cid in targets:
+                state.get('pending_subs', {}).pop(cid, None)
+            deliver([chat], f'거절 처리: {', '.join(targets) or '-'}')
+        elif kind == 'rm_user':
+            if not arg:
+                deliver([chat], '예: /수신삭제 6841230577')
+                continue
+            dyn = [x for x in state.get('dyn_normals', []) if x not in arg]
+            state['dyn_normals'] = dyn
+            _sync_recipients(state)
+            fixed = [x for x in arg if x in ENV_NORMALS or x in SUBS]
+            msg = f'삭제: {', '.join(arg)}'
+            if fixed:
+                msg += f'\n※ {', '.join(fixed)} 는 GitHub Secret에 고정된 사람이라 여기선 못 빼요.'
+            deliver([chat], msg + '\n\n' + _members_text(state))
+        elif kind == 'members':
+            deliver([chat], _members_text(state))
+        elif kind == 'help':
             deliver([OWNER], HELP_TEXT)
         elif kind == 'resume':
             state['paused_until'] = ''
@@ -1283,6 +1401,31 @@ def _is_korean_item(it):
 
 def make_brief(prompt):
     return gemini(prompt, [요약모델, 보조모델] + 폴백모델목록)
+_URL_CACHE = {}
+
+def _shorten(url, state=None):
+    if not url or len(url) <= 15:
+        return url
+    cache = state.get('url_cache', {}) if state is not None else _URL_CACHE
+    if url in cache:
+        return cache[url]
+    out = url
+    for api in ('https://tinyurl.com/api-create.php?url=', 'https://is.gd/create.php?format=simple&url='):
+        try:
+            r = requests.get(api + urllib.parse.quote(url, safe=''), timeout=8)
+            if r.status_code == 200 and r.text.strip().startswith('http') and (len(r.text.strip()) < 60):
+                out = r.text.strip()
+                break
+        except Exception:
+            continue
+    out = re.sub('^https?://(www\\.)?', '', out)
+    cache[url] = out
+    if state is not None:
+        if len(cache) > 300:
+            for k in list(cache)[:100]:
+                cache.pop(k, None)
+        state['url_cache'] = cache
+    return out
 _SHORT_REASON = ''
 
 def build_short(items, state):
@@ -1334,15 +1477,13 @@ def build_short(items, state):
     def _rep(m):
         try:
             it = ordered[int(m.group(1)) - 1]
-            return ' ' + it.get('link', '')
+            return ' ' + _shorten(it.get('link', ''), state)
         except Exception:
             return ''
     out = re.sub('\\s*\\[(\\d+)\\]', _rep, out)
     out = re.sub('<[^>]+>', '', out).replace('**', '').replace('__', '')
     out = '\n'.join((l for l in out.splitlines() if not re.match('^\\s*[\\[【#]', l) and '미시 신호' not in l and ('취재·조사' not in l)))
-    now_kst = now_utc() + datetime.timedelta(hours=9)
-    text = f'[{표시제목} 단문] {now_kst.strftime('%m-%d %H:%M')} KST\n\n{out}'
-    return text[:TG_LIMIT]
+    return out[:TG_LIMIT]
 
 def run_digest_tiers(state, items, stat, send_all):
     seen = set(state['seen'])
@@ -1370,7 +1511,7 @@ def run_digest_tiers(state, items, stat, send_all):
     if short:
         fails, err = deliver(_active(state, MASTERS + NORMALS + SUBS), short, plain=True, token=TG_TOKEN_SHORT or None)
         if fails:
-            hint = " → 두 번째 봇에게 각자 'Start'를 눌렀는지 확인" if TG_TOKEN_SHORT and '403' in err else ''
+            hint = " → 그 사람이 봇에게 'Start'를 안 눌렀거나 ID 오류. '/수신자'로 ID별 확인 가능" if 'not found' in err or '403' in err else ''
             deliver(MASTERS, f'⚠️ 단문 전송 실패 {fails}명: {err}{hint}', silent=True)
         state['last_short'] = short[:2000]
         state['short_log'] = (state.get('short_log', []) + [short[:1500]])[-6:]
@@ -1471,6 +1612,7 @@ def main():
     now_kst = now_utc() + datetime.timedelta(hours=9)
     _apply_secret_config()
     state = load_state()
+    _sync_recipients(state)
     _h(state, 'runs')
     _ensure_polling(state)
     _maybe_weekly_health(state, now_kst)
@@ -1559,7 +1701,7 @@ def main():
             res = breaking_check(pending, state) if pending else None
             if res:
                 head, ref = res
-                url = (ref or {}).get('link', '')
+                url = _shorten((ref or {}).get('link', ''), state)
                 msg = f'[긴급] {now_kst.strftime('%m-%d %H:%M')} KST\n{re.sub('<[^>]+>', '', head)}' + (f'\n{url}' if url else '') + '\n\n자세한 내용은 다음 정기 보고에서.'
                 fails, err = deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
                 if fails:
