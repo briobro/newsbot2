@@ -1607,10 +1607,17 @@ def _humanize(text):
     text = re.sub('\\n\\n', lambda m: '\n\n\n' if _rnd.random() < 0.25 else '\n\n', text)
     return text
 _SHORT_REASON = ''
+_OUTLET_NAMES = set()
 
 def _core(line):
-    x = re.sub('\\[\\d+\\]|https?://\\S+|[\\w.-]+\\.[a-z]{2,}/\\S+', '', line)
-    x = re.split('향후|전망\\s*:', x)[0]
+    x = re.sub('\\[\\d+\\]|https?://\\S+|[\\w.-]+\\.[a-z]{2,}/\\S*|\\([^)]*\\)', '', line)
+    x = re.sub('^[\\s•○●■▪·\\-]+', '', x)
+    x = re.sub('^(?:[\\w.-]+\\.[a-z]{2,}|[^,]{1,12}(?:뉴스|일보|경제|신문|방송|TV|투데이|타임스|저널|위크|미디어|통신))\\s*,\\s*', '', x)
+    for nm in _OUTLET_NAMES:
+        if nm and x.startswith(nm):
+            x = x[len(nm):].lstrip(' ,')
+    segs = [t for t in x.split(',') if t.strip()]
+    x = ','.join(segs[:2])
     return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', x)
 
 def _core_sim(a, b):
@@ -1632,6 +1639,13 @@ def _is_local_ru(it):
     d = _domain(it.get('link', ''))
     src = (it.get('source', '') or '').lower()
     return bool(re.search('[\\u0400-\\u04ff]', t)) or any((k in d for k in _RU_LOCAL_DOMAINS)) or src.startswith('tg:')
+
+def _link_text(link, state=None):
+    u = _resolve(link, state)
+    disp = re.sub('^https?://(www\\.)?', '', u)
+    if len(disp) > 90:
+        return _shorten(u, state)
+    return disp
 
 def build_short(items, state):
     items = _coverage_tags(items)
@@ -1661,21 +1675,6 @@ def build_short(items, state):
     if 'NO_UPDATE' in out.upper() and len(out) < 40:
         _SHORT_REASON = '새 소식 없음(NO_UPDATE)'
         return ''
-    for _ in range(2):
-        if len(out) >= 3200:
-            break
-        refs = {int(x) for x in re.findall('\\[(\\d+)', out)}
-        remaining = [l for i, l in enumerate(lst, 1) if i not in refs]
-        if len(remaining) < 5:
-            break
-        more_prompt = base_prompt + '\n\n[이미 작성한 줄 — 같은 사안 반복 금지]\n' + out + "\n\n위 줄들과 겹치지 않는 '새 사안'만, 아직 인용 안 한 자료에서 같은 형식으로 10~15줄 더 써라. 정말 더 쓸 새 사안이 없으면 정확히 NONE 만 출력."
-        try:
-            more = make_brief(more_prompt).strip()
-        except Exception:
-            break
-        if not more or more.upper().startswith('NONE') or len(more) < 30:
-            break
-        out = out + '\n' + more
     try:
         lines_now = [l for l in out.splitlines() if l.strip()]
 
@@ -1693,9 +1692,17 @@ def build_short(items, state):
                 out = out + '\n' + more
     except Exception as ex:
         print('현장형 쿼터 처리 실패:', str(ex)[:80])
+    lines_now = [l for l in out.splitlines() if l.strip()]
+    if len(lines_now) >= 4:
+        try:
+            merged = make_brief("아래 줄들 중 '같은 사건'을 다룬 줄은 하나로 합쳐라(정보가 가장 많은 한 줄만 남기고, 매체가 다르다는 이유로 따로 두지 마라). 합칠 때 [n] 번호는 남긴 줄의 것을 유지. 새 내용 추가·문장 수정 금지, 순서 유지. 결과 줄들만 출력.\n\n" + '\n'.join(lines_now)).strip()
+            if merged and len([l for l in merged.splitlines() if l.strip()]) <= len(lines_now):
+                out = merged
+        except Exception as ex:
+            print('병합 패스 실패:', str(ex)[:60])
     uniq = []
     for l in out.splitlines():
-        if l.strip() and any((_core_sim(l, u) >= 0.7 for u in uniq)):
+        if l.strip() and any((_core_sim(l, u) >= 0.6 for u in uniq)):
             continue
         uniq.append(l)
     out = '\n'.join(uniq)
@@ -1739,6 +1746,12 @@ def build_short(items, state):
             it = ordered[int(m.group(1)) - 1]
             if not _is_micro(it):
                 return ''
+            line_txt = out[max(0, m.start() - 160):m.start()]
+            tt = it.get('title', '') or ''
+            if re.search('[가-힣]', tt):
+                tks = {w for w in re.findall('[가-힣]{2,}|\\d+', tt)}
+                if tks and (not any((w in line_txt for w in tks))):
+                    return ''
             link = it.get('link', '')
             if not _direct(link):
                 best = None
@@ -1750,9 +1763,9 @@ def build_short(items, state):
                     link = best['link']
             extra = ''
             t = it.get('title', '') or ''
-            if re.search('[\\u0400-\\u04ff\\u4e00-\\u9fff\\u3040-\\u30ff]', t):
+            if not re.search('[가-힣]', t) and re.search('[\\u0400-\\u04ff\\u4e00-\\u9fff\\u3040-\\u30ff]', t):
                 extra = ' (원문: ' + t[:60].strip() + ')'
-            return extra + ' ' + _shorten(link, state)
+            return extra + ' ' + _link_text(link, state)
         except Exception:
             return ''
 
@@ -1768,6 +1781,38 @@ def build_short(items, state):
     out = re.sub('\\[[\\d,、·/\\s]*\\]', '', out)
     out = out.replace('★', '')
     out = re.sub('\\(\\s*(러시아\\s*현지|한|보도\\s*\\d+곳[^)]*|국내\\s*미보도|선점[^)]*)\\s*\\)', '', out)
+    global _OUTLET_NAMES
+    _OUTLET_NAMES = {str(it.get('source', '')).strip() for it in items if it.get('source')} | {_domain(it.get('link', '')) for it in items}
+    _OUTLET_NAMES = {n for n in _OUTLET_NAMES if n and len(n) >= 2}
+
+    def _strip_outlet(l):
+        x = re.sub('^([\\s•○●■▪·\\-]*)', '', l)
+        lead = l[:len(l) - len(x)]
+        x = re.sub('^(?:[\\w.-]+\\.[a-z]{2,}|[^,]{1,14}(?:뉴스|일보|경제|신문|방송|TV|투데이|타임스|저널|위크|미디어|통신|채널A|KBS|MBC|SBS|YTN|JTBC))\\s*,\\s*', '', x)
+        for nm in sorted(_OUTLET_NAMES, key=len, reverse=True):
+            if x.startswith(nm + ','):
+                x = x[len(nm) + 1:].lstrip()
+                break
+        return lead + x
+    out = '\n'.join((_strip_outlet(l) for l in out.splitlines()))
+
+    def _drop_instr(l):
+        um = re.search('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)', l)
+        body, tail = (l[:um.start()], l[um.start():]) if um else (l, '')
+        parens = re.findall('\\([^()]*미확인[^()]*\\)', body)
+        core = re.sub('\\([^()]*미확인[^()]*\\)', '\x00P\x00', body)
+        core = re.sub('\\([^()]*(?:필요|봐야|체크|요망|확인)[^()]*\\)', '', core)
+        segs = [t for t in core.split(',')]
+        segs = [t for t in segs if not re.search('(확인|분석|평가|점검|파악|추적|검토|조사)\\s*(이|을|가)?\\s*필요|봐야할듯|봐야|체크해야|필요할듯|필요함', t)]
+        core = ','.join(segs)
+        kept_ph = core.count('\x00P\x00')
+        for p_ in parens[:kept_ph]:
+            core = core.replace('\x00P\x00', p_, 1)
+        for p_ in parens[kept_ph:]:
+            core = core.rstrip(' ,.') + p_
+        core = core.replace('\x00P\x00', '')
+        return (core.rstrip(' ,.') + (' ' + tail if tail else '')).rstrip()
+    out = '\n'.join((_drop_instr(l) for l in out.splitlines()))
     cleaned = []
     for l in out.splitlines():
         um = re.search('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)', l)
@@ -1778,13 +1823,9 @@ def build_short(items, state):
         body = re.sub('\\s+-\\s+[^-(]*?(필요|확인|파악|추적|점검|봐야|체크|요망)[^-(]*$', '', body)
         cleaned.append((body.rstrip() + (' ' + tail if tail else '')).rstrip())
     out = '\n'.join(cleaned)
-    vocab = set()
-    for kw in 검색어목록 or []:
-        for w in re.split('\\s+', kw):
-            if len(w) >= 2:
-                vocab.add(w)
-    vocab |= {h for h in _BORDER_HINTS or [] if re.search('[가-힣]', h)}
-    vocab |= set(주제어휘)
+    vocab = {v.strip().lower() for v in 주제어휘 if v.strip()}
+    if not vocab:
+        vocab = {w for kw in 검색어목록 or [] for w in re.split('\\s+', kw) if len(w) >= 2}
     kept2 = []
     for l in out.splitlines():
         if not l.strip():
