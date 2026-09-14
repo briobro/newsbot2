@@ -138,6 +138,7 @@ UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 COMMAND_HELP = '\n\n⏱ 정기 보고: {보고안내}\n🛠 명령: /보고 · /일시중지 · /재개 · /요약 ○○ · /검색어 · /도움말'.replace('{보고안내}', 보고안내)
 HELP_TEXT = f'🛠 <b>명령 안내</b>\n/보고 — 지금 바로 브리핑 받기\n/요약 ○○ — 특정 주제만 찾아 정리 (예: /요약 ○○ 동향)\n/일시중지 [이틀·사흘·일주일] — 정기 알림 멈춤\n/재개 — 다시 시작\n/검색어 — 자동 추가된 검색어 보기\n/검색어삭제 ○○ — 자동 검색어에서 빼기\n/확인 — 봇 응답·상태 확인\n/도움말 — 이 안내\n\n정기 보고: {보고안내}\n※ 한글 명령(/일시중지 등)은 그대로 입력하면 동작해요. 텔레그램 자동완성 메뉴(/)에는 규칙상 영문 별칭(/report·/pause·/resume·/keywords·/help)만 떠요 — 둘 다 됩니다.'
 TG_TOKEN = os.environ.get('TELEGRAM_TOKEN', '').strip()
+TG_TOKEN_SHORT = os.environ.get('TELEGRAM_TOKEN_SHORT', '').strip()
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 
 def _ids(name):
@@ -156,7 +157,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -179,10 +180,10 @@ def save_state(state):
     else:
         open(STATE_FILE, 'w', encoding='utf-8').write(data)
 
-def _post_one(chat, text, silent=False, plain=False, urgent=False):
+def _post_one(chat, text, silent=False, plain=False, urgent=False, token=None):
     if _quiet_now() and (not urgent):
         silent = True
-    url = f'https://api.telegram.org/bot{TG_TOKEN}/sendMessage'
+    url = f'https://api.telegram.org/bot{token or TG_TOKEN}/sendMessage'
     payload = {'chat_id': chat, 'text': text, 'disable_web_page_preview': True, 'disable_notification': silent}
     if not plain:
         payload['parse_mode'] = 'HTML'
@@ -217,14 +218,14 @@ def _quiet_now():
         return 야간시작 <= h < 야간끝
     return h >= 야간시작 or h < 야간끝
 
-def deliver(targets, text, silent=False, plain=False, urgent=False):
+def deliver(targets, text, silent=False, plain=False, urgent=False, token=None):
     if len(text) > TG_LIMIT:
         text = text[:TG_LIMIT]
     if _quiet_now() and (not urgent):
         silent = True
     for chat in targets:
         try:
-            _post_one(chat, text, silent=silent, plain=plain, urgent=urgent)
+            _post_one(chat, text, silent=silent, plain=plain, urgent=urgent, token=token)
         except Exception as ex:
             print(f'전송 실패 (받는사람 {chat}): {ex}')
 
@@ -374,12 +375,13 @@ def _roundrobin(sources, cutoff, cap):
 def _parallel(jobs):
     out = []
     with ThreadPoolExecutor(max_workers=동시작업) as ex:
-        futs = [(b, ex.submit(fn)) for b, fn in jobs]
-        for b, f in futs:
+        futs = [(j[:-1], ex.submit(j[-1])) for j in jobs]
+        for meta, f in futs:
             try:
-                out.append((b, f.result()))
+                res = f.result()
             except Exception:
-                out.append((b, []))
+                res = []
+            out.append(tuple(meta) + (res,))
     return out
 
 def expand_queries(items, n):
@@ -453,6 +455,8 @@ def _maybe_learn_keywords(state, items):
     state['auto_kw_updated'] = now_utc().isoformat()
     if added or removed:
         print(f'검색어 자동 추가 {len(added)}건 / 삭제 {len(removed)}건')
+        _h(state, 'kw_added', len(added))
+        _h(state, 'kw_removed', len(removed))
         parts = []
         if added:
             parts.append('➕ 추가: ' + ', '.join(added))
@@ -508,6 +512,8 @@ def _maybe_learn_sources(state):
     state['auto_sources'] = alive[-자동소스최대:]
     if added or dropped:
         print(f'소스 자동 추가 {len(added)}건 / 정리 {len(dropped)}건')
+        _h(state, 'src_added', len(added))
+        _h(state, 'src_dropped', len(dropped))
         parts = []
         if added:
             parts.append('➕ 검증 통과한 새 소스:\n' + '\n'.join(added))
@@ -715,6 +721,7 @@ def fetch_weibo(uid=None, keyword=None, limit=10):
     except Exception as ex:
         print(f'웨이보 수집 실패({uid or keyword}):', str(ex)[:80])
     return out
+_FEED_STATS = {}
 
 def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
     days = max(1, (시간범위 + 23) // 24)
@@ -725,15 +732,15 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
         jobs.append(('ko', lambda t=t: search_news(t, _lang_of(t), days, 출처당최대)))
     if regional:
         for rss in 추가RSS목록 + list(auto_feeds or []):
-            jobs.append(('rss', lambda rss=rss: _rss_items(rss, 출처당최대)))
+            jobs.append(('rss', rss, lambda rss=rss: _rss_items(rss, 출처당최대)))
         for s in 소셜RSS목록:
-            jobs.append(('sns', lambda s=s: _rss_items(s, 출처당최대)))
+            jobs.append(('sns', s, lambda s=s: _rss_items(s, 출처당최대)))
         for ch in 텔레채널:
-            jobs.append(('sns', lambda ch=ch: fetch_telegram(ch, 출처당최대)))
+            jobs.append(('sns', f'tg:{ch}', lambda ch=ch: fetch_telegram(ch, 출처당최대)))
         for uid in 웨이보계정:
-            jobs.append(('sns', lambda uid=uid: fetch_weibo(uid=uid, limit=출처당최대)))
+            jobs.append(('sns', f'wb:{uid}', lambda uid=uid: fetch_weibo(uid=uid, limit=출처당최대)))
         for kw in 웨이보검색어:
-            jobs.append(('sns', lambda kw=kw: fetch_weibo(keyword=kw, limit=출처당최대)))
+            jobs.append(('sns', f'wbkw:{kw}', lambda kw=kw: fetch_weibo(keyword=kw, limit=출처당최대)))
         if 중국검색:
             for t in 중국어검색어목록:
                 jobs.append(('zh', lambda t=t: search_news(t, 'zh', days, 출처당최대)))
@@ -745,7 +752,10 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
                 jobs.append(('ja', lambda t=t: search_news(t, 'ja', days, 출처당최대)))
     counts = {'ko': 0, 'zh': 0, 'ru': 0, 'ja': 0, 'rss': 0, 'sns': 0, 'naver': 0, 'expand': 0}
     sources = []
-    for bucket, lst in _parallel(jobs):
+    for res in _parallel(jobs):
+        bucket, lst = (res[0], res[-1])
+        if len(res) == 3:
+            _FEED_STATS[res[1]] = len(lst)
         counts[bucket] += len(lst)
         if bucket == 'sns':
             for it in lst:
@@ -784,7 +794,7 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
                 break
             counts['expand'] += len(queries)
             ex_jobs = [('x', lambda q=q: search_news(q, _lang_of(q), days, 출처당최대)) for q in queries]
-            ex_sources = [lst for _, lst in _parallel(ex_jobs)]
+            ex_sources = [r[-1] for r in _parallel(ex_jobs)]
             more = _roundrobin(ex_sources, cutoff, 하드캡)
             have = {it['link'] for it in items}
             added = []
@@ -1324,22 +1334,59 @@ def run_digest_tiers(state, items, stat, send_all):
     if len(digest.strip()) < 40 and 'NO_UPDATE' in digest.upper():
         state['seen'] = sorted(set(state['seen']) | {it['link'] for it in items})
         print('업데이트 없음 - 전송 생략')
+        _h(state, 'skip')
         return 0
     for m in build_messages(표시제목, items, digest, stat=None, lead=None, max_pages=장문최대페이지):
         deliver(_active(state, MASTERS), m)
         time.sleep(0.4)
+    _h(state, 'long')
+    _h(state, 'pro' if 'pro' in (_BRIEF_ENGINE or '') else 'flash')
     try:
         short = build_short(items, state)
     except Exception as ex:
         print('단문 생성 실패:', str(ex)[:100])
         short = ''
     if short:
-        deliver(_active(state, MASTERS + NORMALS + SUBS), short, plain=True)
+        deliver(_active(state, MASTERS + NORMALS + SUBS), short, plain=True, token=TG_TOKEN_SHORT or None)
         state['last_short'] = short[:2000]
         state['short_log'] = (state.get('short_log', []) + [short[:1500]])[-6:]
+        _h(state, 'short')
+    else:
+        _h(state, 'skip')
     state['seen'] = sorted(set(state['seen']) | {it['link'] for it in items})
     state['last_summary'] = digest[:3000]
     return len(items)
+
+def _h(state, key, n=1):
+    h = state.setdefault('health', {})
+    h[key] = h.get(key, 0) + n
+
+def _h_feed(state, name, count):
+    z = state.setdefault('health', {}).setdefault('zero', {})
+    if count > 0:
+        z.pop(name, None)
+    else:
+        z[name] = z.get(name, 0) + 1
+
+def _maybe_weekly_health(state, now_kst):
+    h = state.get('health', {})
+    wk = now_kst.strftime('%G-W%V')
+    if now_kst.weekday() != 0 or h.get('sent_week') == wk:
+        return
+    runs, ok = (h.get('runs', 0), h.get('ok', 0))
+    zero = {k: v for k, v in h.get('zero', {}).items() if v >= 6}
+    lines = [f'📋 주간 점검 ({wk})', f'실행 {runs}회 · 정상 종료 {ok}회 · 비정상 {max(0, runs - ok)}회', f'보고: 장문 {h.get('long', 0)} · 단문 {h.get('short', 0)} · 긴급 {h.get('urgent', 0)} · 미발송(중복/없음) {h.get('skip', 0)}', f'분석 모델: Pro {h.get('pro', 0)}회 · Flash 등 강등 {h.get('flash', 0)}회' + (' ⚠ 한도 자주 소진' if h.get('flash', 0) > h.get('pro', 0) else ''), f'소스: 자동 추가 {h.get('src_added', 0)} · 정리 {h.get('src_dropped', 0)} · 자동 검색어 +{h.get('kw_added', 0)}/-{h.get('kw_removed', 0)}']
+    if zero:
+        lines.append('⚠ 계속 0건인 소스(점검 필요):')
+        for k, v in sorted(zero.items(), key=lambda x: -x[1])[:8]:
+            lines.append(f'  · {k} — {v}회 연속')
+    else:
+        lines.append('소스 상태: 이상 없음')
+    try:
+        deliver(MASTERS, '\n'.join(lines), silent=True)
+    except Exception:
+        pass
+    state['health'] = {'sent_week': wk, 'zero': h.get('zero', {})}
 
 def _due_slot(now_kst, last_key, slots, state=None):
     if now_kst.weekday() >= 5 and (not 주말발송):
@@ -1399,7 +1446,9 @@ def main():
     now_kst = now_utc() + datetime.timedelta(hours=9)
     _apply_secret_config()
     state = load_state()
+    _h(state, 'runs')
     _ensure_polling(state)
+    _maybe_weekly_health(state, now_kst)
     if not 검색어목록:
         today = now_kst.strftime('%Y-%m-%d')
         if state.get('cfg_alerted_day') != today:
@@ -1461,6 +1510,8 @@ def main():
         save_state(state)
         return
     state['last_search_ts'] = now_utc().isoformat()
+    for _name, _cnt in list(_FEED_STATS.items()):
+        _h_feed(state, _name, _cnt)
     if is_digest:
         _maybe_learn_keywords(state, items)
         _maybe_learn_sources(state)
@@ -1485,9 +1536,10 @@ def main():
                 head, ref = res
                 url = (ref or {}).get('link', '')
                 msg = f'[긴급] {now_kst.strftime('%m-%d %H:%M')} KST\n{re.sub('<[^>]+>', '', head)}' + (f'\n{url}' if url else '') + '\n\n자세한 내용은 다음 정기 보고에서.'
-                deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True)
+                deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
                 state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
                 state['alert_log'] = (state.get('alert_log', []) + [head[:120]])[-20:]
+                _h(state, 'urgent')
                 print('긴급 알림 전송(1통)')
             else:
                 print('중대 속보 없음 - 점검만')
@@ -1495,6 +1547,8 @@ def main():
             print('정기 시각 아님 - 점검만')
     except Exception as ex:
         print('전송 처리 실패(다음 주기 재시도):', ex)
+        state.setdefault('health', {})['ok'] = state['health'].get('ok', 0) - 1
+    _h(state, 'ok')
     save_state(state)
 if __name__ == '__main__':
     main()
