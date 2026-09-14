@@ -82,6 +82,7 @@ def _apply_secret_config():
 공휴일자동 = True
 _HOLI_CACHE = set()
 조용한시간_무음 = True
+항상무음 = True
 야간시작 = 22
 야간끝 = 8
 주간시작 = '07:00'
@@ -181,17 +182,22 @@ def save_state(state):
         open(STATE_FILE, 'w', encoding='utf-8').write(data)
 
 def _post_one(chat, text, silent=False, plain=False, urgent=False, token=None):
-    if _quiet_now() and (not urgent):
+    if 항상무음 or (_quiet_now() and (not urgent)):
         silent = True
     url = f'https://api.telegram.org/bot{token or TG_TOKEN}/sendMessage'
     payload = {'chat_id': chat, 'text': text, 'disable_web_page_preview': True, 'disable_notification': silent}
     if not plain:
         payload['parse_mode'] = 'HTML'
     r = requests.post(url, json=payload, timeout=30)
-    if r.status_code == 400:
-        plain = re.sub('<[^>]+>', '', text)
-        r = requests.post(url, json={'chat_id': chat, 'text': plain, 'disable_web_page_preview': True, 'disable_notification': silent}, timeout=30)
-    r.raise_for_status()
+    if r.status_code == 400 and (not plain):
+        text2 = re.sub('<[^>]+>', '', text)
+        r = requests.post(url, json={'chat_id': chat, 'text': text2, 'disable_web_page_preview': True, 'disable_notification': silent}, timeout=30)
+    if r.status_code >= 400:
+        try:
+            desc = r.json().get('description', '')
+        except Exception:
+            desc = r.text[:80]
+        raise RuntimeError(f'{r.status_code} {desc}')
 
 def register_commands(state):
     if state.get('bot_cmds_v') == '3':
@@ -221,13 +227,17 @@ def _quiet_now():
 def deliver(targets, text, silent=False, plain=False, urgent=False, token=None):
     if len(text) > TG_LIMIT:
         text = text[:TG_LIMIT]
-    if _quiet_now() and (not urgent):
+    if 항상무음 or (_quiet_now() and (not urgent)):
         silent = True
+    fails, last_err = (0, '')
     for chat in targets:
         try:
             _post_one(chat, text, silent=silent, plain=plain, urgent=urgent, token=token)
         except Exception as ex:
+            fails += 1
+            last_err = str(ex)[:120]
             print(f'전송 실패 (받는사람 {chat}): {ex}')
+    return (fails, last_err)
 
 def _ensure_polling(state):
     if state.get('webhook_cleared'):
@@ -1271,6 +1281,10 @@ def _single_for_sub(topic, digest, now_kst):
 def _is_korean_item(it):
     return bool(re.search('[\\uac00-\\ud7a3]', it.get('title', '')))
 
+def make_brief(prompt):
+    return gemini(prompt, [요약모델, 보조모델] + 폴백모델목록)
+_SHORT_REASON = ''
+
 def build_short(items, state):
     ordered = sorted(items, key=lambda it: 0 if _is_korean_item(it) else 1)
     ordered = ordered[:40]
@@ -1285,7 +1299,10 @@ def build_short(items, state):
         prev += '\n[이미 보낸 긴급 알림]\n' + alerts
     prompt = 프롬프트_단문.replace('{이전}', prev).replace('{목록}', '\n'.join(lst))
     out = make_brief(prompt).strip()
+    global _SHORT_REASON
+    _SHORT_REASON = ''
     if 'NO_UPDATE' in out.upper() and len(out) < 40:
+        _SHORT_REASON = '새 소식 없음(NO_UPDATE)'
         return ''
     prev_lines = [l for h in hist for l in h.splitlines() if len(l) > 15]
 
@@ -1311,6 +1328,7 @@ def build_short(items, state):
         kept.append(line)
     out = '\n'.join(kept).strip()
     if len(re.findall('[가-힣]', out)) < 12:
+        _SHORT_REASON = '전부 이전 단문과 중복(진전 없음)'
         return ''
 
     def _rep(m):
@@ -1321,6 +1339,7 @@ def build_short(items, state):
             return ''
     out = re.sub('\\s*\\[(\\d+)\\]', _rep, out)
     out = re.sub('<[^>]+>', '', out).replace('**', '').replace('__', '')
+    out = '\n'.join((l for l in out.splitlines() if not re.match('^\\s*[\\[【#]', l) and '미시 신호' not in l and ('취재·조사' not in l)))
     now_kst = now_utc() + datetime.timedelta(hours=9)
     text = f'[{표시제목} 단문] {now_kst.strftime('%m-%d %H:%M')} KST\n\n{out}'
     return text[:TG_LIMIT]
@@ -1341,18 +1360,24 @@ def run_digest_tiers(state, items, stat, send_all):
         time.sleep(0.4)
     _h(state, 'long')
     _h(state, 'pro' if 'pro' in (_BRIEF_ENGINE or '') else 'flash')
+    global _SHORT_REASON
     try:
         short = build_short(items, state)
     except Exception as ex:
         print('단문 생성 실패:', str(ex)[:100])
         short = ''
+        _SHORT_REASON = '생성 오류: ' + str(ex)[:80]
     if short:
-        deliver(_active(state, MASTERS + NORMALS + SUBS), short, plain=True, token=TG_TOKEN_SHORT or None)
+        fails, err = deliver(_active(state, MASTERS + NORMALS + SUBS), short, plain=True, token=TG_TOKEN_SHORT or None)
+        if fails:
+            hint = " → 두 번째 봇에게 각자 'Start'를 눌렀는지 확인" if TG_TOKEN_SHORT and '403' in err else ''
+            deliver(MASTERS, f'⚠️ 단문 전송 실패 {fails}명: {err}{hint}', silent=True)
         state['last_short'] = short[:2000]
         state['short_log'] = (state.get('short_log', []) + [short[:1500]])[-6:]
         _h(state, 'short')
     else:
         _h(state, 'skip')
+        deliver(MASTERS, f'ℹ️ 단문 미발송: {_SHORT_REASON or '내용 없음'}', silent=True)
     state['seen'] = sorted(set(state['seen']) | {it['link'] for it in items})
     state['last_summary'] = digest[:3000]
     return len(items)
@@ -1536,7 +1561,9 @@ def main():
                 head, ref = res
                 url = (ref or {}).get('link', '')
                 msg = f'[긴급] {now_kst.strftime('%m-%d %H:%M')} KST\n{re.sub('<[^>]+>', '', head)}' + (f'\n{url}' if url else '') + '\n\n자세한 내용은 다음 정기 보고에서.'
-                deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
+                fails, err = deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
+                if fails:
+                    deliver(MASTERS, f'⚠️ 긴급 전송 실패 {fails}명: {err}', silent=True)
                 state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
                 state['alert_log'] = (state.get('alert_log', []) + [head[:120]])[-20:]
                 _h(state, 'urgent')
