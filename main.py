@@ -42,6 +42,9 @@ def _apply_secret_config():
     st_ = cfg.get('san_tokens')
     if isinstance(st_, list) and st_:
         g['제재토큰'] = [str(x).lower() for x in st_]
+    tv = cfg.get('topic_vocab')
+    if isinstance(tv, list) and tv:
+        g['주제어휘'] = [str(x) for x in tv]
     ic = cfg.get('invite_code')
     if isinstance(ic, str) and ic.strip():
         g['초대코드'] = ic.strip()
@@ -145,6 +148,24 @@ HELP_TEXT = f"🛠 <b>명령 안내</b>\n/보고 — 지금 바로 브리핑 받
 TG_TOKEN = os.environ.get('TELEGRAM_TOKEN', '').strip()
 TG_TOKEN_SHORT = os.environ.get('TELEGRAM_TOKEN_SHORT', '').strip()
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+import builtins as _bi
+
+def _redact(text):
+    t = str(text)
+    for v in (os.environ.get('TELEGRAM_TOKEN', ''), os.environ.get('TELEGRAM_TOKEN_SHORT', ''), os.environ.get('GEMINI_API_KEY', ''), os.environ.get('NAVER_CLIENT_ID', ''), os.environ.get('NAVER_CLIENT_SECRET', ''), os.environ.get('HOLIDAY_KEY', '')):
+        if v and len(v) >= 6:
+            t = t.replace(v, '***')
+    t = re.sub('/bot[0-9]+:[A-Za-z0-9_-]{20,}', '/bot***', t)
+    t = re.sub('([?&](?:key|serviceKey|api_key|token)=)[^&\\s]+', '\\1***', t)
+    for name in ('TELEGRAM_CHAT_ID_MASTER', 'TELEGRAM_CHAT_ID_NORMAL', 'TELEGRAM_CHAT_ID_SUB'):
+        for cid in re.split('[,\\uff0c;\\s]+', os.environ.get(name, '')):
+            cid = re.sub('[^\\d-]', '', cid)
+            if len(cid) >= 5:
+                t = t.replace(cid, '…' + cid[-3:])
+    return t
+
+def print(*args, **kwargs):
+    _bi.print(*[_redact(a) for a in args], **kwargs)
 
 def _ids(name):
     raw = os.environ.get(name, '')
@@ -159,6 +180,7 @@ ENV_NORMALS = _ids('TELEGRAM_CHAT_ID_NORMAL')
 NORMALS = list(ENV_NORMALS)
 SUBS = _ids('TELEGRAM_CHAT_ID_SUB')
 초대코드 = ''
+주제어휘 = []
 OWNER = MASTERS[0] if MASTERS else ''
 TG_CHATS = MASTERS
 NAVER_ID = os.environ.get('NAVER_CLIENT_ID', '').strip()
@@ -1544,7 +1566,7 @@ def _humanize(text):
     url_re = re.compile('(\\S+\\.[a-z]{2,}/\\S*|https?://\\S+)')
     tail_forms = ['{x} 피료해보임', '{x}해야할듯', '{x} 필요해보임', '{x}필요', '{x} 필여', '{x} 필요함', '{x} 좀 해봐야', '{x}해봐야함', '{x} 필요할듯', '{x} 요망', '{x}해야하나', '{x} 피료', '{x}봐야할듯', '{x} 필요 있음']
     typo = {'확인': ['확이', '학인', '확인'], '파악': ['파학', '파악', '파악'], '추적': ['추젘', '추적', '추적'], '점검': ['점겅', '점검'], '검토': ['검토우', '검토'], '분석': ['분서', '분석'], '취재': ['취제', '취재'], '확보': ['확뽀', '확보'], '체크': ['체쿠', '체크'], '규모': ['규모', '규뫄'], '여부': ['여부', '여붜'], '경로': ['경로', '경뢰'], '내용': ['내용', '내욤'], '관계': ['관계', '관게']}
-    marks = _rnd.choice([['▪', '·'], ['·', '▪'], ['▪', '•'], ['-', '·']])
+    marks = ['•'] * 17 + ['○', '●', '■']
     out_lines = []
     for line in text.splitlines():
         if not line.strip():
@@ -1553,34 +1575,11 @@ def _humanize(text):
         m = url_re.search(line)
         body, tail = (line[:m.start()], line[m.start():]) if m else (line, '')
         body = re.sub('^[\\-\\*\\u2022\\u25aa\\u25cf\\u30fb·▪•●■◆▶>]+\\s*', '', body).strip()
-        if ' : ' in body or ': ' in body or '：' in body:
-            parts = re.split('\\s*[:：]\\s*', body, maxsplit=1)
-            fact, req = (parts[0], parts[1] if len(parts) > 1 else '')
-            req = re.sub('\\s*(필요함|필요|요망|확인 요|필요해보임|해야함|해야 함)\\.?\\s*$', '', req).strip()
-            if req:
-                verb_m = re.search('(확인|파악|추적|점검|검토|분석|취재|확보|체크)\\s*$', req)
-                if verb_m:
-                    v = verb_m.group(1)
-                    head = req[:verb_m.start()].rstrip()
-                    if _rnd.random() < 0.6:
-                        req = (head + ' ' if head else '') + _rnd.choice(tail_forms).format(x=v)
-                    else:
-                        req = (head + ' ' if head else '') + v + _rnd.choice([' 필요', ' 필요함', '필요', ' 필요할듯', ' 요망', ' 피료'])
-                else:
-                    req = req + _rnd.choice([' 확인 필요', ' 파악 피료해보임', ' 체크해야할듯', ' 확인 필요할듯', ' 확인해봐야함', ' 봐야할듯', ' 추적 필요함'])
-                for w, opts in _rnd.sample(list(typo.items()), k=4):
-                    if w in req and _rnd.random() < 0.35:
-                        req = req.replace(w, _rnd.choice(opts), 1)
-                toks = req.split(' ')
-                if len(toks) > 2 and _rnd.random() < 0.5:
-                    i = _rnd.randrange(1, len(toks))
-                    toks[i - 1:i + 1] = [toks[i - 1] + toks[i]]
-                req = ' '.join(toks)
-                if _rnd.random() < 0.25:
-                    req = req.replace(' ', '  ', 1)
-            sep = _rnd.choice([' : ', ': ', ' :', ' - ', ' :  '])
-            body = fact + sep + req
         p_drop = _rnd.choice([0.55, 0.7, 0.85, 0.95])
+        om = re.search('\\(원문:.*?\\)', body)
+        orig = om.group(0) if om else ''
+        if orig:
+            body = body.replace(orig, '\x00ORIG\x00')
         body = re.sub('(?<=[가-힣0-9%)])[ ]+(?=[가-힣0-9(])', lambda m: '' if _rnd.random() < p_drop else m.group(0), body)
         if _rnd.random() < 0.5:
             body = re.sub(',[ ]+', lambda m: ',' if _rnd.random() < 0.6 else m.group(0), body)
@@ -1596,6 +1595,13 @@ def _humanize(text):
             mark = ''
         else:
             mark = _rnd.choice(marks) + ('' if _rnd.random() < 0.3 else ' ')
+        if orig:
+            body = body.replace('\x00ORIG\x00', orig)
+        um2 = re.search('\\([^()]*미확인\\)', body)
+        if um2 and _rnd.random() < 0.5:
+            seg = um2.group(0)
+            seg2 = _rnd.choice([seg.replace('미확인', '미학인'), seg.replace('미확인', '미확이'), seg.replace('등은', '등은'), seg.replace(', ', ','), seg.replace('미확인', '미확인됨')])
+            body = body.replace(seg, seg2, 1)
         out_lines.append((mark + body + (' ' if tail else '') + tail).rstrip())
     text = '\n'.join(out_lines)
     text = re.sub('\\n\\n', lambda m: '\n\n\n' if _rnd.random() < 0.25 else '\n\n', text)
@@ -1608,12 +1614,17 @@ def _core(line):
     return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', x)
 
 def _core_sim(a, b):
+    a0, b0 = (a, b)
     a, b = (_core(a), _core(b))
     if len(a) < 6 or len(b) < 6:
         return 0.0
     A = {a[i:i + 2] for i in range(len(a) - 1)}
     B = {b[i:i + 2] for i in range(len(b) - 1)}
-    return len(A & B) / max(1, len(A | B))
+    sim = len(A & B) / max(1, len(A | B))
+    tok = lambda x: set(re.findall("'[^']{2,}'|\\d+(?:\\.\\d+)?(?:억|만|천|배|톤|대|척|명|%)", x))
+    if tok(a0) & tok(b0) and sim >= 0.25:
+        return 1.0
+    return sim
 _RU_LOCAL_DOMAINS = ('primamedia.ru', 'dvnovosti.ru', 'newsvl.ru', 'vostokmedia.com', 'khabarovsk', 'amur', 'vl.ru', 'dvhab', 'primorye')
 
 def _is_local_ru(it):
@@ -1718,9 +1729,16 @@ def build_short(items, state):
     def _direct(u):
         return u and (not ('news.google.com' in u or 'bing.com' in u))
 
+    def _is_micro(it):
+        cnt, ko = it.get('_cov', (9, True))
+        g, _ = _provenance(it)
+        return cnt <= 2 and (not ko) or _is_local_ru(it) or bool(it.get('social')) or (g in ('primary', 'border', 'sns'))
+
     def _rep(m):
         try:
             it = ordered[int(m.group(1)) - 1]
+            if not _is_micro(it):
+                return ''
             link = it.get('link', '')
             if not _direct(link):
                 best = None
@@ -1730,7 +1748,11 @@ def build_short(items, state):
                         break
                 if best:
                     link = best['link']
-            return ' ' + _shorten(link, state)
+            extra = ''
+            t = it.get('title', '') or ''
+            if re.search('[\\u0400-\\u04ff\\u4e00-\\u9fff\\u3040-\\u30ff]', t):
+                extra = ' (원문: ' + t[:60].strip() + ')'
+            return extra + ' ' + _shorten(link, state)
         except Exception:
             return ''
 
@@ -1745,6 +1767,36 @@ def build_short(items, state):
     out = re.sub('[ \\t]*\\[(\\d+)\\]', _rep, out)
     out = re.sub('\\[[\\d,、·/\\s]*\\]', '', out)
     out = out.replace('★', '')
+    out = re.sub('\\(\\s*(러시아\\s*현지|한|보도\\s*\\d+곳[^)]*|국내\\s*미보도|선점[^)]*)\\s*\\)', '', out)
+    cleaned = []
+    for l in out.splitlines():
+        um = re.search('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)', l)
+        body, tail = (l[:um.start()], l[um.start():]) if um else (l, '')
+        parts = re.split('\\s*[:：]\\s*', body, maxsplit=1)
+        if len(parts) == 2 and re.search('(필요|확인|파악|추적|점검|봐야|체크|요망|취재|분석)', parts[1]):
+            body = parts[0].rstrip(' ,.-')
+        body = re.sub('\\s+-\\s+[^-(]*?(필요|확인|파악|추적|점검|봐야|체크|요망)[^-(]*$', '', body)
+        cleaned.append((body.rstrip() + (' ' + tail if tail else '')).rstrip())
+    out = '\n'.join(cleaned)
+    vocab = set()
+    for kw in 검색어목록 or []:
+        for w in re.split('\\s+', kw):
+            if len(w) >= 2:
+                vocab.add(w)
+    vocab |= {h for h in _BORDER_HINTS or [] if re.search('[가-힣]', h)}
+    vocab |= set(주제어휘)
+    kept2 = []
+    for l in out.splitlines():
+        if not l.strip():
+            continue
+        low = l.lower()
+        if re.search('연관성[^\\n]{0,12}(불확실|미상|불명|낮|없)', l):
+            continue
+        fact = re.split('향후|전망|가능성|우려', low, maxsplit=1)[0]
+        if not any((v in fact for v in vocab)):
+            continue
+        kept2.append(l)
+    out = '\n'.join(kept2)
     out = re.sub('<[^>]+>', '', out).replace('**', '').replace('__', '')
     url_re = re.compile('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)')
     fixed = []
