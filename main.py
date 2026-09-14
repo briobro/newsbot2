@@ -78,6 +78,7 @@ def _apply_secret_config():
 심층반복 = 1
 평일슬롯 = [(8, 0), (14, 0), (20, 0)]
 장문최대페이지 = 3
+단문사람체 = True
 마스터슬롯 = []
 주말발송 = False
 공휴일휴무 = True
@@ -146,7 +147,13 @@ TG_TOKEN_SHORT = os.environ.get('TELEGRAM_TOKEN_SHORT', '').strip()
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 
 def _ids(name):
-    return [c.strip() for c in os.environ.get(name, '').split(',') if c.strip()]
+    raw = os.environ.get(name, '')
+    out = []
+    for c in re.split('[,\\uff0c;\\s]+', raw):
+        c = re.sub('[^\\d-]', '', c)
+        if re.fullmatch('-?\\d{3,}', c) and c not in out:
+            out.append(c)
+    return out
 MASTERS = _ids('TELEGRAM_CHAT_ID_MASTER')
 ENV_NORMALS = _ids('TELEGRAM_CHAT_ID_NORMAL')
 NORMALS = list(ENV_NORMALS)
@@ -163,7 +170,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -228,20 +235,39 @@ def _quiet_now():
     if 야간시작 <= 야간끝:
         return 야간시작 <= h < 야간끝
     return h >= 야간시작 or h < 야간끝
+_LAST_FAILED, _LAST_OK = ([], [])
+
+def _remember_delivery(failed, okids):
+    global _LAST_FAILED, _LAST_OK
+    _LAST_FAILED, _LAST_OK = (list(failed), list(okids))
+
+def _notify_fail_once(state, kind, err):
+    already = set(state.get('unreach_alerted', []))
+    for c in _LAST_OK:
+        already.discard(c)
+    new_fail = [c for c in _LAST_FAILED if c not in already]
+    if new_fail:
+        hint = " → 그 사람이 봇에게 'Start'를 안 눌렀거나 ID 오류('/수신자'로 확인). 이 ID는 다시 알리지 않아요." if 'not found' in err or '403' in err else ''
+        deliver(MASTERS, f'⚠️ {kind} 전송 실패 {len(new_fail)}명({', '.join(new_fail)}): {err}{hint}', silent=True)
+        already |= set(new_fail)
+    state['unreach_alerted'] = sorted(already)
 
 def deliver(targets, text, silent=False, plain=False, urgent=False, token=None):
     if len(text) > TG_LIMIT:
         text = text[:TG_LIMIT]
     if 항상무음 or (_quiet_now() and (not urgent)):
         silent = True
-    fails, last_err = (0, '')
+    fails, last_err, failed, okids = (0, '', [], [])
     for chat in targets:
         try:
             _post_one(chat, text, silent=silent, plain=plain, urgent=urgent, token=token)
+            okids.append(str(chat))
         except Exception as ex:
             fails += 1
             last_err = str(ex)[:120]
+            failed.append(str(chat))
             print(f'전송 실패 (받는사람 {chat}): {ex}')
+    _remember_delivery(failed, okids)
     return (fails, last_err)
 
 def _ensure_polling(state):
@@ -910,7 +936,52 @@ def _provenance(it):
         return ('foreign', '외신·' + lang)
     return ('main', '주류')
 
+def _coverage_tags(items):
+
+    def key(t):
+        return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', t or '')
+
+    def sim(a, b):
+        if len(a) < 6 or len(b) < 6:
+            return 0.0
+        A = {a[i:i + 2] for i in range(len(a) - 1)}
+        B = {b[i:i + 2] for i in range(len(b) - 1)}
+        return len(A & B) / max(1, len(A | B))
+    keys = [key(it.get('title', '')) for it in items]
+    cluster = [-1] * len(items)
+    n = 0
+    for i in range(len(items)):
+        if cluster[i] != -1:
+            continue
+        cluster[i] = n
+        for j in range(i + 1, len(items)):
+            if cluster[j] == -1 and sim(keys[i], keys[j]) >= 0.5:
+                cluster[j] = n
+        n += 1
+    outlets, ko_main = ({}, {})
+    for it, c in zip(items, cluster):
+        outlets.setdefault(c, set()).add((it.get('source') or _domain(it.get('link', '')) or '?').lower())
+        g, _ = _provenance(it)
+        if g == 'main' and re.search('[가-힣]', it.get('title', '')):
+            ko_main[c] = True
+    for it, c in zip(items, cluster):
+        cnt = len(outlets.get(c, ()))
+        it['_cov'] = (cnt, ko_main.get(c, False))
+    return items
+
+def _cov_label(it):
+    cnt, ko = it.get('_cov', (0, False))
+    if not cnt:
+        return ''
+    lab = f'보도 {cnt}곳'
+    if not ko:
+        lab += '·국내 미보도'
+    if cnt <= 2 and (not ko):
+        lab = '★선점 ' + lab
+    return f' ({lab})'
+
 def summarize(topic, items, prev_summary=''):
+    items = _coverage_tags(items)
     groups = {'border': [], 'sns': [], 'primary': [], 'foreign': [], 'main': []}
     seen_titles = set()
     for it in items:
@@ -927,7 +998,7 @@ def summarize(topic, items, prev_summary=''):
     blocks, total, main_used = ([], 0, 0)
     for g in order:
         for it in groups[g]:
-            tag = f' ({it['_plabel']})' if it.get('_plabel') else ''
+            tag = (f' ({it['_plabel']})' if it.get('_plabel') else '') + _cov_label(it)
             b = f'[{len(blocks) + 1}] {it['title']}{tag} ({it.get('source', '')})'
             if it.get('body'):
                 b += f'\n발췌: {it['body']}'
@@ -1012,10 +1083,10 @@ def keyword_message(auto):
         L.append('[변동·자동 0] 아직 없음 — 상황 따라 자동 추가·삭제돼요')
     return '\n'.join(L)
 
-def build_messages(topic, items, digest, stat=None, prefix='', lead=None, show_links=True, footer=True, max_pages=None):
+def build_messages(topic, items, digest, stat=None, prefix='', lead=None, show_links=True, footer=True, max_pages=None, show_head=True):
     now_kst = now_utc() + datetime.timedelta(hours=9)
     status = status_line(stat) + '\n' if stat is not None else ''
-    head = f'{status}{prefix}📰 <b>[{html.escape(topic)}] {now_kst.strftime('%m-%d %H:%M')} KST</b> (자료 {len(items)}건)\n\n'
+    head = f'{status}{prefix}📰 <b>[{html.escape(topic)}] {now_kst.strftime('%m-%d %H:%M')} KST</b> (자료 {len(items)}건)\n\n' if show_head else prefix or ''
 
     def line(i, it):
         t = html.escape(it['title'])
@@ -1030,7 +1101,7 @@ def build_messages(topic, items, digest, stat=None, prefix='', lead=None, show_l
                 when = ''
         return f'{i + 1}. {when}<a href="{u}">{t}</a>' + (f' - {s}' if s else '')
     links = [line(i, it) for i, it in enumerate(items)][:링크표시최대]
-    linkblock = '\n\n📎 <b>주요 최신 자료</b> (괄호=보도 시각, KST)\n' + '\n'.join(links) if links else ''
+    linkblock = '\n\n📎 <b>자료</b>\n' + '\n'.join(links) if links else ''
     tail = COMMAND_HELP if footer else ''
     idx = digest.find('[취재')
     if idx > 0:
@@ -1401,22 +1472,63 @@ def _is_korean_item(it):
 
 def make_brief(prompt):
     return gemini(prompt, [요약모델, 보조모델] + 폴백모델목록)
+
+def _resolve(url, state=None):
+    if not url:
+        return url
+    cache = state.get('url_res', {}) if state is not None else {}
+    if url in cache:
+        return cache[url]
+    out = url
+    try:
+        if 'bing.com/news/apiclick' in url:
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            real = (q.get('url') or [''])[0]
+            if real.startswith('http'):
+                out = real
+        elif 'news.google.com' in url:
+            try:
+                from googlenewsdecoder import gnewsdecoder
+                r = gnewsdecoder(url, interval=1)
+                if isinstance(r, dict) and r.get('status') and str(r.get('decoded_url', '')).startswith('http'):
+                    out = r['decoded_url']
+            except Exception as ex:
+                print('구글뉴스 링크 해석 실패:', str(ex)[:60])
+    except Exception:
+        pass
+    if state is not None:
+        cache[url] = out
+        if len(cache) > 400:
+            for k in list(cache)[:150]:
+                cache.pop(k, None)
+        state['url_res'] = cache
+    return out
 _URL_CACHE = {}
+_SHORTENERS = ('https://tinyurl.com/api-create.php?url=', 'https://is.gd/create.php?format=simple&url=', 'https://v.gd/create.php?format=simple&url=', 'https://da.gd/s?url=')
+_DEAD_SHORTENERS = set()
 
 def _shorten(url, state=None):
-    if not url or len(url) <= 15:
+    if not url:
+        return url
+    url = _resolve(url, state)
+    if len(url) <= 15:
         return url
     cache = state.get('url_cache', {}) if state is not None else _URL_CACHE
     if url in cache:
         return cache[url]
     out = url
-    for api in ('https://tinyurl.com/api-create.php?url=', 'https://is.gd/create.php?format=simple&url='):
+    for api in _SHORTENERS:
+        if api in _DEAD_SHORTENERS:
+            continue
         try:
             r = requests.get(api + urllib.parse.quote(url, safe=''), timeout=8)
-            if r.status_code == 200 and r.text.strip().startswith('http') and (len(r.text.strip()) < 60):
-                out = r.text.strip()
+            t = (r.text or '').strip()
+            if r.status_code == 200 and t.startswith('http') and (len(t) < 60) and (' ' not in t):
+                out = t
                 break
+            _DEAD_SHORTENERS.add(api)
         except Exception:
+            _DEAD_SHORTENERS.add(api)
             continue
     out = re.sub('^https?://(www\\.)?', '', out)
     cache[url] = out
@@ -1426,15 +1538,62 @@ def _shorten(url, state=None):
                 cache.pop(k, None)
         state['url_cache'] = cache
     return out
+import random as _rnd
+
+def _humanize(text):
+    url_re = re.compile('(\\S+\\.[a-z]{2,}/\\S*|https?://\\S+)')
+    endings = [('확인 필요', '확인필요'), ('확인 필요', '확인 요'), ('확인 필요', '체크 필요'), ('확인 필요', '확인해야함'), ('전망 :', '전망:'), ('전망 :', '전망-'), ('전망 :', '전망 ,'), ('필요', '필요함'), ('전망', '전망임')]
+    out_lines = []
+    for line in text.splitlines():
+        if not line.strip():
+            out_lines.append(line)
+            continue
+        m = url_re.search(line)
+        body, tail = (line[:m.start()], line[m.start():]) if m else (line, '')
+        for a, b in _rnd.sample(endings, k=2):
+            if a in body and _rnd.random() < 0.35:
+                body = body.replace(a, b, 1)
+        toks = body.split(' ')
+        if len(toks) > 4 and _rnd.random() < 0.45:
+            i = _rnd.randrange(1, len(toks) - 1)
+            if re.search('[가-힣]$', toks[i - 1]) and re.search('^[가-힣]', toks[i]) and (not re.search('\\d', toks[i - 1] + toks[i])):
+                toks[i - 1:i + 1] = [toks[i - 1] + toks[i]]
+        body = ' '.join(toks)
+        if _rnd.random() < 0.3:
+            body = body.replace(', ', ',  ', 1) if ', ' in body else body.replace(' 향후', '  향후', 1)
+        if _rnd.random() < 0.25:
+            body = body.replace(', ', ' ', 1)
+        body = body.rstrip()
+        r = _rnd.random()
+        if r < 0.25:
+            body += '.'
+        elif r < 0.35:
+            body += '..'
+        if body.startswith('▪ '):
+            body = _rnd.choice(['▪ ', '- ', '▪ ', '· ', '']) + body[2:]
+        out_lines.append((body + (' ' if tail else '') + tail).rstrip())
+    joined = []
+    for i, l in enumerate(out_lines):
+        joined.append(l)
+        if l.strip() and i < len(out_lines) - 1 and (out_lines[i + 1].strip() == ''):
+            pass
+    text = '\n'.join(joined)
+    text = re.sub('\\n\\n', lambda m: '\n\n\n' if _rnd.random() < 0.3 else '\n\n', text)
+    return text
 _SHORT_REASON = ''
 
 def build_short(items, state):
-    ordered = sorted(items, key=lambda it: 0 if _is_korean_item(it) else 1)
-    ordered = ordered[:40]
+    items = _coverage_tags(items)
+
+    def _rank(it):
+        cnt, ko = it.get('_cov', (9, True))
+        scoop = 0 if cnt <= 2 and (not ko) else 1
+        return (scoop, 0 if _is_korean_item(it) else 1)
+    ordered = sorted(items, key=_rank)[:40]
     lst = []
     for i, it in enumerate(ordered, 1):
         tag = '(한)' if _is_korean_item(it) else ''
-        lst.append(f'[{i}] {it.get('title', '')} {tag} ({it.get('source', '')})')
+        lst.append(f'[{i}] {it.get('title', '')} {tag}{_cov_label(it)} ({it.get('source', '')})')
     hist = state.get('short_log', [])[-6:]
     prev = '\n---\n'.join(hist) if hist else '(없음)'
     alerts = '\n'.join(state.get('alert_log', [])[-10:])
@@ -1474,15 +1633,48 @@ def build_short(items, state):
         _SHORT_REASON = '전부 이전 단문과 중복(진전 없음)'
         return ''
 
+    def _key(t):
+        return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', t or '')
+
+    def _bigram_sim(a, b):
+        a, b = (_key(a), _key(b))
+        if len(a) < 4 or len(b) < 4:
+            return 0.0
+        A = {a[i:i + 2] for i in range(len(a) - 1)}
+        B = {b[i:i + 2] for i in range(len(b) - 1)}
+        return len(A & B) / max(1, len(A | B))
+
+    def _direct(u):
+        return u and (not ('news.google.com' in u or 'bing.com' in u))
+
     def _rep(m):
         try:
             it = ordered[int(m.group(1)) - 1]
-            return ' ' + _shorten(it.get('link', ''), state)
+            link = it.get('link', '')
+            if not _direct(link):
+                best = None
+                for o in ordered:
+                    if _direct(o.get('link', '')) and _bigram_sim(o.get('title', ''), it.get('title', '')) >= 0.55:
+                        best = o
+                        break
+                if best:
+                    link = best['link']
+            return ' ' + _shorten(link, state)
         except Exception:
             return ''
     out = re.sub('\\s*\\[(\\d+)\\]', _rep, out)
     out = re.sub('<[^>]+>', '', out).replace('**', '').replace('__', '')
     out = '\n'.join((l for l in out.splitlines() if not re.match('^\\s*[\\[【#]', l) and '미시 신호' not in l and ('취재·조사' not in l)))
+    lines = []
+    for l in out.splitlines():
+        l = l.strip()
+        if not l:
+            continue
+        l = re.sub('^[\\-\\*\\u2022\\u25aa\\u25cf\\u30fb·▪•●■◆▶>]+\\s*', '', l)
+        lines.append('▪ ' + l)
+    out = '\n\n'.join(lines)
+    if 단문사람체:
+        out = _humanize(out)
     return out[:TG_LIMIT]
 
 def run_digest_tiers(state, items, stat, send_all):
@@ -1496,7 +1688,7 @@ def run_digest_tiers(state, items, stat, send_all):
         print('업데이트 없음 - 전송 생략')
         _h(state, 'skip')
         return 0
-    for m in build_messages(표시제목, items, digest, stat=None, lead=None, max_pages=장문최대페이지):
+    for m in build_messages(표시제목, items, digest, stat=None, lead=None, max_pages=장문최대페이지, show_head=False, footer=False):
         deliver(_active(state, MASTERS), m)
         time.sleep(0.4)
     _h(state, 'long')
@@ -1511,8 +1703,7 @@ def run_digest_tiers(state, items, stat, send_all):
     if short:
         fails, err = deliver(_active(state, MASTERS + NORMALS + SUBS), short, plain=True, token=TG_TOKEN_SHORT or None)
         if fails:
-            hint = " → 그 사람이 봇에게 'Start'를 안 눌렀거나 ID 오류. '/수신자'로 ID별 확인 가능" if 'not found' in err or '403' in err else ''
-            deliver(MASTERS, f'⚠️ 단문 전송 실패 {fails}명: {err}{hint}', silent=True)
+            _notify_fail_once(state, '단문', err)
         state['last_short'] = short[:2000]
         state['short_log'] = (state.get('short_log', []) + [short[:1500]])[-6:]
         _h(state, 'short')
@@ -1705,7 +1896,7 @@ def main():
                 msg = f'[긴급] {now_kst.strftime('%m-%d %H:%M')} KST\n{re.sub('<[^>]+>', '', head)}' + (f'\n{url}' if url else '') + '\n\n자세한 내용은 다음 정기 보고에서.'
                 fails, err = deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
                 if fails:
-                    deliver(MASTERS, f'⚠️ 긴급 전송 실패 {fails}명: {err}', silent=True)
+                    _notify_fail_once(state, '긴급', err)
                 state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
                 state['alert_log'] = (state.get('alert_log', []) + [head[:120]])[-20:]
                 _h(state, 'urgent')
