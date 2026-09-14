@@ -427,7 +427,11 @@ def _roundrobin(sources, cutoff, cap):
                 it = s[i]
                 if it['link'] in seen:
                     continue
-                if it.get('pub') and it['pub'] < cutoff:
+                p_ = it.get('pub')
+                if p_ is not None and getattr(p_, 'tzinfo', None) is None:
+                    p_ = p_.replace(tzinfo=datetime.timezone.utc)
+                    it['pub'] = p_
+                if p_ and p_ < cutoff:
                     continue
                 seen.add(it['link'])
                 items.append(it)
@@ -745,7 +749,7 @@ def fetch_telegram(channel, limit):
             if tm:
                 link = tm.group(1)
                 try:
-                    pub = datetime.datetime.fromisoformat(tm.group(2).replace('Z', '+00:00')).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                    pub = datetime.datetime.fromisoformat(tm.group(2).replace('Z', '+00:00')).astimezone(datetime.timezone.utc)
                 except Exception:
                     pub = None
             out.append({'title': txt[:200], 'link': link, 'source': f'TG:{channel}', 'pub': pub, 'seed': txt[:300]})
@@ -776,14 +780,17 @@ def fetch_weibo(uid=None, keyword=None, limit=10):
             tag = f'WB:{keyword}' if keyword else f'WB:{uid}'
             pub = None
             try:
-                pub = parsedate_to_datetime(mb.get('created_at', '')).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                pub = parsedate_to_datetime(mb.get('created_at', '')).astimezone(datetime.timezone.utc)
             except Exception:
                 pub = None
             out.append({'title': txt[:200], 'link': f'https://m.weibo.cn/status/{mid}', 'source': tag, 'pub': pub, 'seed': txt[:300]})
             if len(out) >= limit:
                 break
     except Exception as ex:
-        print(f'웨이보 수집 실패({uid or keyword}):', str(ex)[:80])
+        global _WB_FAILS
+        _WB_FAILS = globals().get('_WB_FAILS', 0) + 1
+        if _WB_FAILS <= 1:
+            print('웨이보 수집 실패(차단/비JSON) — 이번 실행은 건너뜀:', str(ex)[:60])
     return out
 _FEED_STATS = {}
 
