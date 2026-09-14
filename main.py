@@ -1542,7 +1542,9 @@ import random as _rnd
 
 def _humanize(text):
     url_re = re.compile('(\\S+\\.[a-z]{2,}/\\S*|https?://\\S+)')
-    endings = [('확인 필요', '확인필요'), ('확인 필요', '확인 요'), ('확인 필요', '체크 필요'), ('확인 필요', '확인해야함'), ('전망 :', '전망:'), ('전망 :', '전망-'), ('전망 :', '전망 ,'), ('필요', '필요함'), ('전망', '전망임')]
+    tail_forms = ['{x} 피료해보임', '{x}해야할듯', '{x} 필요해보임', '{x}필요', '{x} 필여', '{x} 필요함', '{x} 좀 해봐야', '{x}해봐야함', '{x} 필요할듯', '{x} 요망', '{x}해야하나', '{x} 피료', '{x}봐야할듯', '{x} 필요 있음']
+    typo = {'확인': ['확이', '학인', '확인'], '파악': ['파학', '파악', '파악'], '추적': ['추젘', '추적', '추적'], '점검': ['점겅', '점검'], '검토': ['검토우', '검토'], '분석': ['분서', '분석'], '취재': ['취제', '취재'], '확보': ['확뽀', '확보'], '체크': ['체쿠', '체크'], '규모': ['규모', '규뫄'], '여부': ['여부', '여붜'], '경로': ['경로', '경뢰'], '내용': ['내용', '내욤'], '관계': ['관계', '관게']}
+    marks = _rnd.choice([['▪', '·'], ['·', '▪'], ['▪', '•'], ['-', '·']])
     out_lines = []
     for line in text.splitlines():
         if not line.strip():
@@ -1550,37 +1552,75 @@ def _humanize(text):
             continue
         m = url_re.search(line)
         body, tail = (line[:m.start()], line[m.start():]) if m else (line, '')
-        for a, b in _rnd.sample(endings, k=2):
-            if a in body and _rnd.random() < 0.35:
-                body = body.replace(a, b, 1)
-        toks = body.split(' ')
-        if len(toks) > 4 and _rnd.random() < 0.45:
-            i = _rnd.randrange(1, len(toks) - 1)
-            if re.search('[가-힣]$', toks[i - 1]) and re.search('^[가-힣]', toks[i]) and (not re.search('\\d', toks[i - 1] + toks[i])):
-                toks[i - 1:i + 1] = [toks[i - 1] + toks[i]]
-        body = ' '.join(toks)
-        if _rnd.random() < 0.3:
-            body = body.replace(', ', ',  ', 1) if ', ' in body else body.replace(' 향후', '  향후', 1)
-        if _rnd.random() < 0.25:
-            body = body.replace(', ', ' ', 1)
-        body = body.rstrip()
+        body = re.sub('^[\\-\\*\\u2022\\u25aa\\u25cf\\u30fb·▪•●■◆▶>]+\\s*', '', body).strip()
+        if ' : ' in body or ': ' in body or '：' in body:
+            parts = re.split('\\s*[:：]\\s*', body, maxsplit=1)
+            fact, req = (parts[0], parts[1] if len(parts) > 1 else '')
+            req = re.sub('\\s*(필요함|필요|요망|확인 요|필요해보임|해야함|해야 함)\\.?\\s*$', '', req).strip()
+            if req:
+                verb_m = re.search('(확인|파악|추적|점검|검토|분석|취재|확보|체크)\\s*$', req)
+                if verb_m:
+                    v = verb_m.group(1)
+                    head = req[:verb_m.start()].rstrip()
+                    if _rnd.random() < 0.6:
+                        req = (head + ' ' if head else '') + _rnd.choice(tail_forms).format(x=v)
+                    else:
+                        req = (head + ' ' if head else '') + v + _rnd.choice([' 필요', ' 필요함', '필요', ' 필요할듯', ' 요망', ' 피료'])
+                else:
+                    req = req + _rnd.choice([' 확인 필요', ' 파악 피료해보임', ' 체크해야할듯', ' 확인 필요할듯', ' 확인해봐야함', ' 봐야할듯', ' 추적 필요함'])
+                for w, opts in _rnd.sample(list(typo.items()), k=4):
+                    if w in req and _rnd.random() < 0.35:
+                        req = req.replace(w, _rnd.choice(opts), 1)
+                toks = req.split(' ')
+                if len(toks) > 2 and _rnd.random() < 0.5:
+                    i = _rnd.randrange(1, len(toks))
+                    toks[i - 1:i + 1] = [toks[i - 1] + toks[i]]
+                req = ' '.join(toks)
+                if _rnd.random() < 0.25:
+                    req = req.replace(' ', '  ', 1)
+            sep = _rnd.choice([' : ', ': ', ' :', ' - ', ' :  '])
+            body = fact + sep + req
+        p_drop = _rnd.choice([0.55, 0.7, 0.85, 0.95])
+        body = re.sub('(?<=[가-힣0-9%)])[ ]+(?=[가-힣0-9(])', lambda m: '' if _rnd.random() < p_drop else m.group(0), body)
+        if _rnd.random() < 0.5:
+            body = re.sub(',[ ]+', lambda m: ',' if _rnd.random() < 0.6 else m.group(0), body)
+        if _rnd.random() < 0.15:
+            body = body.replace(', ', ',  ', 1)
         r = _rnd.random()
-        if r < 0.25:
+        if r < 0.2:
             body += '.'
-        elif r < 0.35:
+        elif r < 0.28:
             body += '..'
-        if body.startswith('▪ '):
-            body = _rnd.choice(['▪ ', '- ', '▪ ', '· ', '']) + body[2:]
-        out_lines.append((body + (' ' if tail else '') + tail).rstrip())
-    joined = []
-    for i, l in enumerate(out_lines):
-        joined.append(l)
-        if l.strip() and i < len(out_lines) - 1 and (out_lines[i + 1].strip() == ''):
-            pass
-    text = '\n'.join(joined)
-    text = re.sub('\\n\\n', lambda m: '\n\n\n' if _rnd.random() < 0.3 else '\n\n', text)
+        rr = _rnd.random()
+        if rr < 0.12:
+            mark = ''
+        else:
+            mark = _rnd.choice(marks) + ('' if _rnd.random() < 0.3 else ' ')
+        out_lines.append((mark + body + (' ' if tail else '') + tail).rstrip())
+    text = '\n'.join(out_lines)
+    text = re.sub('\\n\\n', lambda m: '\n\n\n' if _rnd.random() < 0.25 else '\n\n', text)
     return text
 _SHORT_REASON = ''
+
+def _core(line):
+    x = re.sub('\\[\\d+\\]|https?://\\S+|[\\w.-]+\\.[a-z]{2,}/\\S+', '', line)
+    x = re.split('향후|전망\\s*:', x)[0]
+    return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', x)
+
+def _core_sim(a, b):
+    a, b = (_core(a), _core(b))
+    if len(a) < 6 or len(b) < 6:
+        return 0.0
+    A = {a[i:i + 2] for i in range(len(a) - 1)}
+    B = {b[i:i + 2] for i in range(len(b) - 1)}
+    return len(A & B) / max(1, len(A | B))
+_RU_LOCAL_DOMAINS = ('primamedia.ru', 'dvnovosti.ru', 'newsvl.ru', 'vostokmedia.com', 'khabarovsk', 'amur', 'vl.ru', 'dvhab', 'primorye')
+
+def _is_local_ru(it):
+    t = it.get('title', '') or ''
+    d = _domain(it.get('link', ''))
+    src = (it.get('source', '') or '').lower()
+    return bool(re.search('[\\u0400-\\u04ff]', t)) or any((k in d for k in _RU_LOCAL_DOMAINS)) or src.startswith('tg:')
 
 def build_short(items, state):
     items = _coverage_tags(items)
@@ -1589,46 +1629,77 @@ def build_short(items, state):
         cnt, ko = it.get('_cov', (9, True))
         scoop = 0 if cnt <= 2 and (not ko) else 1
         return (scoop, 0 if _is_korean_item(it) else 1)
-    ordered = sorted(items, key=_rank)[:40]
+    ordered = sorted(items, key=_rank)[:200]
     lst = []
     for i, it in enumerate(ordered, 1):
         tag = '(한)' if _is_korean_item(it) else ''
-        lst.append(f'[{i}] {it.get('title', '')} {tag}{_cov_label(it)} ({it.get('source', '')})')
-    hist = state.get('short_log', [])[-6:]
+        if _is_local_ru(it):
+            tag += '(러시아 현지)'
+        snip = (it.get('seed') or it.get('body') or '')[:70].replace('\n', ' ')
+        snip = f' — {snip}' if snip and snip not in it.get('title', '') else ''
+        lst.append(f'[{i}] {it.get('title', '')}{snip} {tag}{_cov_label(it)} ({it.get('source', '')})')
+    hist = state.get('short_log', [])[-10:]
     prev = '\n---\n'.join(hist) if hist else '(없음)'
     alerts = '\n'.join(state.get('alert_log', [])[-10:])
     if alerts:
         prev += '\n[이미 보낸 긴급 알림]\n' + alerts
-    prompt = 프롬프트_단문.replace('{이전}', prev).replace('{목록}', '\n'.join(lst))
-    out = make_brief(prompt).strip()
+    base_prompt = 프롬프트_단문.replace('{이전}', prev).replace('{목록}', '\n'.join(lst))
+    out = make_brief(base_prompt).strip()
     global _SHORT_REASON
     _SHORT_REASON = ''
     if 'NO_UPDATE' in out.upper() and len(out) < 40:
         _SHORT_REASON = '새 소식 없음(NO_UPDATE)'
         return ''
+    for _ in range(2):
+        if len(out) >= 3200:
+            break
+        refs = {int(x) for x in re.findall('\\[(\\d+)', out)}
+        remaining = [l for i, l in enumerate(lst, 1) if i not in refs]
+        if len(remaining) < 5:
+            break
+        more_prompt = base_prompt + '\n\n[이미 작성한 줄 — 같은 사안 반복 금지]\n' + out + "\n\n위 줄들과 겹치지 않는 '새 사안'만, 아직 인용 안 한 자료에서 같은 형식으로 10~15줄 더 써라. 정말 더 쓸 새 사안이 없으면 정확히 NONE 만 출력."
+        try:
+            more = make_brief(more_prompt).strip()
+        except Exception:
+            break
+        if not more or more.upper().startswith('NONE') or len(more) < 30:
+            break
+        out = out + '\n' + more
+    try:
+        lines_now = [l for l in out.splitlines() if l.strip()]
+
+        def _ref_item(l):
+            m = re.search('\\[(\\d+)', l)
+            return ordered[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(ordered) else None
+        local_n = sum((1 for l in lines_now if _ref_item(l) is not None and _is_local_ru(_ref_item(l))))
+        need = max(0, int(len(lines_now) * 0.2 + 0.999) - local_n)
+        refs = {int(x) for x in re.findall('\\[(\\d+)', out)}
+        local_pool = [l for i, l in enumerate(lst, 1) if i not in refs and _is_local_ru(ordered[i - 1])]
+        if need > 0 and len(local_pool) >= 2:
+            q_prompt = 프롬프트_단문.replace('{이전}', prev).replace('{목록}', '\n'.join(local_pool)) + f"\n\n[이미 작성한 줄 — 반복 금지]\n{out}\n\n위 자료는 전부 '러시아 현지' 것이다. 여기서 현지 특파원이 발로 확인할 수 있는 '현장 확인형' 항목만 {need}~{need + 3}줄 추가하라(요구사항은 '어디 가서 누구에게 무엇을 확인'처럼 구체적으로). 새로 쓸 게 없으면 정확히 NONE."
+            more = make_brief(q_prompt).strip()
+            if more and (not more.upper().startswith('NONE')) and (len(more) > 30):
+                out = out + '\n' + more
+    except Exception as ex:
+        print('현장형 쿼터 처리 실패:', str(ex)[:80])
+    uniq = []
+    for l in out.splitlines():
+        if l.strip() and any((_core_sim(l, u) >= 0.7 for u in uniq)):
+            continue
+        uniq.append(l)
+    out = '\n'.join(uniq)
     prev_lines = [l for h in hist for l in h.splitlines() if len(l) > 15]
-
-    def _norm(x):
-        x = re.sub('https?://\\S+', '', x)
-        return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', x)
-
-    def _sim(a, b):
-        a, b = (_norm(a), _norm(b))
-        if not a or not b:
-            return 0.0
-        A = {a[i:i + 2] for i in range(len(a) - 1)}
-        B = {b[i:i + 2] for i in range(len(b) - 1)}
-        return len(A & B) / max(1, len(A | B))
     kept = []
     for line in out.splitlines():
         if len(line.strip()) < 15:
             kept.append(line)
             continue
-        dup = any((_sim(line, pl) >= 0.6 for pl in prev_lines))
+        dup = any((_core_sim(line, pl) >= 0.7 for pl in prev_lines))
         if dup and '갱신' not in line and ('급변' not in line):
             continue
         kept.append(line)
     out = '\n'.join(kept).strip()
+    out = re.sub('\\s*\\((갱신|급변|update)\\)', '', out)
     if len(re.findall('[가-힣]', out)) < 12:
         _SHORT_REASON = '전부 이전 단문과 중복(진전 없음)'
         return ''
@@ -1662,8 +1733,27 @@ def build_short(items, state):
             return ' ' + _shorten(link, state)
         except Exception:
             return ''
-    out = re.sub('\\s*\\[(\\d+)\\]', _rep, out)
+
+    def _rep_group(m):
+        nums = [int(x) for x in re.findall('\\d+', m.group(1))]
+        cands = [ordered[n - 1] for n in nums if 0 < n <= len(ordered)]
+        if not cands:
+            return ''
+        pick = next((c for c in cands if _is_korean_item(c)), cands[0])
+        return ' [' + str(ordered.index(pick) + 1) + ']'
+    out = re.sub('\\[(\\d+(?:\\s*[,、·/]\\s*\\d+)+)\\]', _rep_group, out)
+    out = re.sub('[ \\t]*\\[(\\d+)\\]', _rep, out)
+    out = re.sub('\\[[\\d,、·/\\s]*\\]', '', out)
+    out = out.replace('★', '')
     out = re.sub('<[^>]+>', '', out).replace('**', '').replace('__', '')
+    url_re = re.compile('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)')
+    fixed = []
+    for l in out.splitlines():
+        urls = url_re.findall(l)
+        if urls:
+            l = url_re.sub('', l).rstrip(' ,.:;-') + ' ' + urls[0]
+        fixed.append(l)
+    out = '\n'.join(fixed)
     out = '\n'.join((l for l in out.splitlines() if not re.match('^\\s*[\\[【#]', l) and '미시 신호' not in l and ('취재·조사' not in l)))
     lines = []
     for l in out.splitlines():
@@ -1675,7 +1765,10 @@ def build_short(items, state):
     out = '\n\n'.join(lines)
     if 단문사람체:
         out = _humanize(out)
-    return out[:TG_LIMIT]
+    if len(out) > TG_LIMIT:
+        cut = out.rfind('\n\n', 0, TG_LIMIT - 1)
+        out = out[:cut] if cut > 0 else out[:TG_LIMIT]
+    return out
 
 def run_digest_tiers(state, items, stat, send_all):
     seen = set(state['seen'])
@@ -1705,7 +1798,7 @@ def run_digest_tiers(state, items, stat, send_all):
         if fails:
             _notify_fail_once(state, '단문', err)
         state['last_short'] = short[:2000]
-        state['short_log'] = (state.get('short_log', []) + [short[:1500]])[-6:]
+        state['short_log'] = (state.get('short_log', []) + [short[:2500]])[-10:]
         _h(state, 'short')
     else:
         _h(state, 'skip')
