@@ -32,6 +32,7 @@ jobs:
       - name: Run digest
         env:
           TELEGRAM_TOKEN:           ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_TOKEN_SHORT:     ${{ secrets.TELEGRAM_TOKEN_SHORT }}
           TELEGRAM_CHAT_ID_MASTER:  ${{ secrets.TELEGRAM_CHAT_ID_MASTER }}
           TELEGRAM_CHAT_ID_NORMAL:  ${{ secrets.TELEGRAM_CHAT_ID_NORMAL }}
           TELEGRAM_CHAT_ID_SUB:     ${{ secrets.TELEGRAM_CHAT_ID_SUB }}
