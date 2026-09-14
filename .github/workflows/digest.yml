@@ -3,10 +3,9 @@ name: news-digest
 on:
   schedule:
     - cron: "0,5,10,15 23 * * 0-4"
-    - cron: "30,35,40,45 4 * * 1-5"
-    - cron: "30,35,40,45 8 * * 1-5"
-    - cron: "0,5,10,15 13 * * 1-5"
-    - cron: "*/30 * * * *"
+    - cron: "0,5,10,15 5 * * 1-5"
+    - cron: "0,5,10,15 11 * * 1-5"
+    - cron: "0 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -40,6 +39,7 @@ jobs:
           NAVER_CLIENT_ID:          ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET:      ${{ secrets.NAVER_CLIENT_SECRET }}
           SECRET_CONFIG:            ${{ secrets.SECRET_CONFIG }}
+          HOLIDAY_KEY:              ${{ secrets.HOLIDAY_KEY }}
           FORCE_DIGEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python main.py
 
