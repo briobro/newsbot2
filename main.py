@@ -1642,24 +1642,39 @@ def _is_local_ru(it):
 
 def _link_text(link, state=None):
     u = _resolve(link, state)
-    disp = re.sub('^https?://(www\\.)?', '', u)
-    if len(disp) > 90:
+    try:
+        pr = urllib.parse.urlparse(u)
+        q = [(k, v) for k, v in urllib.parse.parse_qsl(pr.query, keep_blank_values=True) if not re.match('^(ref|utm_\\w+|fbclid|gclid|source|from|cid|oc)$', k, re.I)]
+        u = urllib.parse.urlunparse(pr._replace(query=urllib.parse.urlencode(q), fragment=''))
+    except Exception:
+        pass
+    disp = re.sub('^https?://(www\\.)?', '', u).rstrip('?&/')
+    if len(disp) > 45:
         return _shorten(u, state)
     return disp
 
 def build_short(items, state):
     items = _coverage_tags(items)
 
+    def _micro(it):
+        d = _domain(it.get('link', ''))
+        src = (it.get('source', '') or '').lower()
+        primary = any((d.endswith(pd) for pd in _PRIMARY_DOMAINS)) or any((k in src for k in _PRIMARY_SRC_HINTS))
+        cnt, ko = it.get('_cov', (9, True))
+        korean_main = bool(re.search('[가-힣]', it.get('title', ''))) and (not primary)
+        return bool(it.get('social')) or _is_local_ru(it) or primary or (not korean_main and cnt <= 2 and (not ko))
+
     def _rank(it):
         cnt, ko = it.get('_cov', (9, True))
-        scoop = 0 if cnt <= 2 and (not ko) else 1
-        return (scoop, 0 if _is_korean_item(it) else 1)
+        return (0 if _micro(it) else 1, 0 if cnt <= 2 and (not ko) else 1, 0 if _is_korean_item(it) else 1)
     ordered = sorted(items, key=_rank)[:200]
     lst = []
     for i, it in enumerate(ordered, 1):
         tag = '(한)' if _is_korean_item(it) else ''
         if _is_local_ru(it):
             tag += '(러시아 현지)'
+        if _micro(it):
+            tag += '(미시)'
         snip = (it.get('seed') or it.get('body') or '')[:70].replace('\n', ' ')
         snip = f' — {snip}' if snip and snip not in it.get('title', '') else ''
         lst.append(f'[{i}] {it.get('title', '')}{snip} {tag}{_cov_label(it)} ({it.get('source', '')})')
@@ -1700,6 +1715,19 @@ def build_short(items, state):
                 out = merged
         except Exception as ex:
             print('병합 패스 실패:', str(ex)[:60])
+    try:
+        ls = [l for l in out.splitlines() if l.strip()]
+
+        def _ref(l):
+            m = re.search('\\[(\\d+)\\]', l)
+            return ordered[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(ordered) else None
+        micro_ls = [l for l in ls if _ref(l) is not None and _micro(_ref(l))]
+        main_ls = [l for l in ls if l not in micro_ls]
+        if micro_ls and len(main_ls) > max(3, int(len(ls) * 0.4)):
+            keep_main = set(main_ls[:max(3, int(len(ls) * 0.4))])
+            out = '\n'.join((l for l in ls if l in micro_ls or l in keep_main))
+    except Exception:
+        pass
     uniq = []
     for l in out.splitlines():
         if l.strip() and any((_core_sim(l, u) >= 0.6 for u in uniq)):
@@ -1738,8 +1766,17 @@ def build_short(items, state):
 
     def _is_micro(it):
         cnt, ko = it.get('_cov', (9, True))
-        g, _ = _provenance(it)
-        return cnt <= 2 and (not ko) or _is_local_ru(it) or bool(it.get('social')) or (g in ('primary', 'border', 'sns'))
+        if _is_local_ru(it) or bool(it.get('social')):
+            return True
+        d = _domain(it.get('link', ''))
+        src = (it.get('source', '') or '').lower()
+        primary = any((d.endswith(pd) for pd in _PRIMARY_DOMAINS)) or any((k in src for k in _PRIMARY_SRC_HINTS))
+        if primary:
+            return True
+        korean_main = bool(re.search('[가-힣]', it.get('title', ''))) and (not primary)
+        if korean_main:
+            return False
+        return cnt <= 2 and (not ko)
 
     def _rep(m):
         try:
@@ -1776,6 +1813,13 @@ def build_short(items, state):
             return ''
         pick = next((c for c in cands if _is_korean_item(c)), cands[0])
         return ' [' + str(ordered.index(pick) + 1) + ']'
+    _CIRC = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
+
+    def _circ_end(m):
+        return f' [{_CIRC.index(m.group(1)) + 1}]'
+    out = re.sub('\\s*([①-⑳])\\s*$', _circ_end, out, flags=re.M)
+    out = re.sub('^([\\s•○●■▪·\\-]*)[①-⑳㉑-㉟⑴-⒇]\\s*', '\\1', out, flags=re.M)
+    out = re.sub('^([\\s•○●■▪·\\-]*)\\d{1,2}[.)]\\s+', '\\1', out, flags=re.M)
     out = re.sub('\\[(\\d+(?:\\s*[,、·/]\\s*\\d+)+)\\]', _rep_group, out)
     out = re.sub('[ \\t]*\\[(\\d+)\\]', _rep, out)
     out = re.sub('\\[[\\d,、·/\\s]*\\]', '', out)
