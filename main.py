@@ -1573,7 +1573,7 @@ def _humanize(text):
     url_re = re.compile('(\\S+\\.[a-z]{2,}/\\S*|https?://\\S+)')
     tail_forms = ['{x} 피료해보임', '{x}해야할듯', '{x} 필요해보임', '{x}필요', '{x} 필여', '{x} 필요함', '{x} 좀 해봐야', '{x}해봐야함', '{x} 필요할듯', '{x} 요망', '{x}해야하나', '{x} 피료', '{x}봐야할듯', '{x} 필요 있음']
     typo = {'확인': ['확이', '학인', '확인'], '파악': ['파학', '파악', '파악'], '추적': ['추젘', '추적', '추적'], '점검': ['점겅', '점검'], '검토': ['검토우', '검토'], '분석': ['분서', '분석'], '취재': ['취제', '취재'], '확보': ['확뽀', '확보'], '체크': ['체쿠', '체크'], '규모': ['규모', '규뫄'], '여부': ['여부', '여붜'], '경로': ['경로', '경뢰'], '내용': ['내용', '내욤'], '관계': ['관계', '관게']}
-    marks = ['•'] * 17 + ['○', '●', '■']
+    marks = ['•'] * 24 + ['○', '●', '■']
     out_lines = []
     for line in text.splitlines():
         if not line.strip():
@@ -1582,14 +1582,14 @@ def _humanize(text):
         m = url_re.search(line)
         body, tail = (line[:m.start()], line[m.start():]) if m else (line, '')
         body = re.sub('^[\\-\\*\\u2022\\u25aa\\u25cf\\u30fb·▪•●■◆▶>]+\\s*', '', body).strip()
-        p_drop = _rnd.choice([0.55, 0.7, 0.85, 0.95])
+        p_drop = _rnd.choice([0.15, 0.25, 0.35])
         om = re.search('\\(원문:.*?\\)', body)
         orig = om.group(0) if om else ''
         if orig:
             body = body.replace(orig, '\x00ORIG\x00')
         body = re.sub('(?<=[가-힣0-9%)])[ ]+(?=[가-힣0-9(])', lambda m: '' if _rnd.random() < p_drop else m.group(0), body)
-        if _rnd.random() < 0.5:
-            body = re.sub(',[ ]+', lambda m: ',' if _rnd.random() < 0.6 else m.group(0), body)
+        if _rnd.random() < 0.25:
+            body = re.sub(',[ ]+', lambda m: ',' if _rnd.random() < 0.4 else m.group(0), body)
         if _rnd.random() < 0.15:
             body = body.replace(', ', ',  ', 1)
         r = _rnd.random()
@@ -1598,10 +1598,10 @@ def _humanize(text):
         elif r < 0.28:
             body += '..'
         rr = _rnd.random()
-        if rr < 0.12:
+        if rr < 0.05:
             mark = ''
         else:
-            mark = _rnd.choice(marks) + ('' if _rnd.random() < 0.3 else ' ')
+            mark = _rnd.choice(marks) + ('' if _rnd.random() < 0.15 else ' ')
         if orig:
             body = body.replace('\x00ORIG\x00', orig)
         um2 = re.search('\\([^()]*미확인\\)', body)
@@ -1609,7 +1609,8 @@ def _humanize(text):
             seg = um2.group(0)
             seg2 = _rnd.choice([seg.replace('미확인', '미학인'), seg.replace('미확인', '미확이'), seg.replace('등은', '등은'), seg.replace(', ', ','), seg.replace('미확인', '미확인됨')])
             body = body.replace(seg, seg2, 1)
-        out_lines.append((mark + body + (' ' if tail else '') + tail).rstrip())
+        glue = _rnd.choice([' ', '  ', '   ', '\n', '\n', ' ', '  ']) if tail else ''
+        out_lines.append((mark + body + glue + tail).rstrip())
     text = '\n'.join(out_lines)
     text = re.sub('\\n\\n', lambda m: '\n\n\n' if _rnd.random() < 0.25 else '\n\n', text)
     return text
@@ -1626,6 +1627,18 @@ def _core(line):
     segs = [t for t in x.split(',') if t.strip()]
     x = ','.join(segs[:2])
     return re.sub('[^0-9A-Za-z가-힣一-鿿]', '', x)
+
+def _stem_overlap(a, b):
+
+    def st(x):
+        x = re.sub('\\[\\d+\\]|https?://\\S+|[\\w.-]+\\.[a-z]{2,}/\\S*|\\([^)]*\\)', '', x)
+        toks = {w[:2] for w in re.findall('[가-힣]{2,}', x)} | set(re.findall('\\d+(?:\\.\\d+)?', x))
+        toks -= {'향후', '전망', '가능', '확인', '미확', '관련', '대한', '위한', '통해', '및', '등'}
+        return toks
+    A, B = (st(a), st(b))
+    if min(len(A), len(B)) < 4:
+        return 0.0
+    return len(A & B) / min(len(A), len(B))
 
 def _core_sim(a, b):
     a0, b0 = (a, b)
@@ -1919,17 +1932,26 @@ def run_digest_tiers(state, items, stat, send_all):
     items = [it for it in items if it['link'] not in seen]
     if not items:
         return 0
-    digest = summarize(표시제목, items, prev_summary=state.get('last_summary', ''))
+    try:
+        digest = summarize(표시제목, items, prev_summary=state.get('last_summary', ''))
+    except Exception as ex:
+        deliver(MASTERS, f'⚠️ 장문 생성 오류: {str(ex)[:120]}', silent=True)
+        raise
     if len(digest.strip()) < 40 and 'NO_UPDATE' in digest.upper():
         state['seen'] = sorted(set(state['seen']) | {it['link'] for it in items})
         print('업데이트 없음 - 전송 생략')
         _h(state, 'skip')
+        deliver(MASTERS, 'ℹ️ 정기 보고 생략: 이전 보고 이후 새 내용 없음', silent=True)
         return 0
-    for m in build_messages(표시제목, items, digest, stat=None, lead=None, max_pages=장문최대페이지, show_head=False, footer=False):
-        deliver(_active(state, MASTERS), m)
-        time.sleep(0.4)
-    _h(state, 'long')
-    _h(state, 'pro' if 'pro' in (_BRIEF_ENGINE or '') else 'flash')
+    try:
+        for m in build_messages(표시제목, items, digest, stat=None, lead=None, max_pages=장문최대페이지, show_head=False, footer=False):
+            deliver(_active(state, MASTERS), m)
+            time.sleep(0.4)
+        _h(state, 'long')
+        _h(state, 'pro' if 'pro' in (_BRIEF_ENGINE or '') else 'flash')
+    except Exception as ex:
+        print('장문 전송 오류:', str(ex)[:100])
+        deliver(MASTERS, f'⚠️ 장문 전송 오류: {str(ex)[:120]}', silent=True)
     global _SHORT_REASON
     try:
         short = build_short(items, state)
@@ -2014,7 +2036,10 @@ def breaking_check(new_items, state=None):
         if it.get('seed'):
             s += ' — ' + it['seed'][:80]
         sample.append(f'[{i}] {s}')
-    prev = '\n'.join((state or {}).get('alert_log', [])[-10:]) or '(없음)'
+    prev_lines = list((state or {}).get('alert_log', [])[-10:])
+    for h in (state or {}).get('short_log', [])[-4:]:
+        prev_lines += [l for l in h.splitlines() if len(l) > 15][:15]
+    prev = '\n'.join(prev_lines[-40:]) or '(없음)'
     prompt = 프롬프트_속보.replace('{이전}', prev) + '\n'.join(sample)
     try:
         resp = gemini(prompt, [보조모델] + 폴백모델목록).strip()
@@ -2127,6 +2152,13 @@ def main():
             alerted = set(state.get('alerted', []))
             pending = [it for it in new_items if it['link'] not in alerted]
             res = breaking_check(pending, state) if pending else None
+            if res:
+                head, ref = res
+                recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.get('last_summary', '') or '').splitlines() if len(l) > 15] + list(state.get('alert_log', []))
+                if '급변' not in head and any((_core_sim(head, l) >= 0.5 or _stem_overlap(head, l) >= 0.5 for l in recent)):
+                    print('긴급 후보가 이미 보고된 사안 → 생략')
+                    state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
+                    res = None
             if res:
                 head, ref = res
                 url = _shorten((ref or {}).get('link', ''), state)
