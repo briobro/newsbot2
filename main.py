@@ -203,7 +203,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'disabled_feeds': d.get('disabled_feeds', {}), 'feed_overrides': d.get('feed_overrides', {}), 'auto_tg': d.get('auto_tg', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'disabled_feeds': d.get('disabled_feeds', {}), 'feed_overrides': d.get('feed_overrides', {}), 'auto_tg': d.get('auto_tg', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'broken_alerted_day': d.get('broken_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -505,7 +505,7 @@ def expand_queries(items, n):
         sample.append('- ' + s)
     prompt = 프롬프트_심층.replace('{n}', str(n)) + '\n'.join(sample)
     try:
-        raw = gemini(prompt, [보조모델] + 폴백모델목록).strip()
+        raw = gemini(prompt, [보조모델] + 폴백모델목록, optional=True).strip()
         raw = re.sub('^```(json)?', '', raw)
         raw = re.sub('```$', '', raw).strip()
         arr = json.loads(raw)
@@ -529,7 +529,7 @@ def refresh_keywords(items, base, current_auto):
         sample.append('- ' + s)
     prompt = 프롬프트_키워드.replace('{base}', ', '.join(base)).replace('{auto}', ', '.join(current_auto) or '(없음)') + '\n'.join(sample)
     try:
-        raw = gemini(prompt, [보조모델] + 폴백모델목록).strip()
+        raw = gemini(prompt, [보조모델] + 폴백모델목록, optional=True).strip()
         raw = re.sub('^```(json)?', '', raw)
         raw = re.sub('```$', '', raw).strip()
         obj = json.loads(raw)
@@ -588,7 +588,7 @@ def _validate_feed(url):
 def discover_sources(existing):
     prompt = 프롬프트_소스.replace('{max}', str(소스후보수)).replace('{rsshub}', RSSHUB).replace('{existing}', ', '.join(list(existing)[:80]))
     try:
-        raw = gemini(prompt, [보조모델] + 폴백모델목록).strip()
+        raw = gemini(prompt, [보조모델] + 폴백모델목록, optional=True).strip()
         raw = re.sub('^```(json)?', '', raw)
         raw = re.sub('```$', '', raw).strip()
         return [str(x).strip() for x in json.loads(raw) if str(x).strip().lower().startswith('http')]
@@ -1032,30 +1032,44 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
         it.setdefault('body', (it.get('seed', '') or '')[:본문길이])
     stat = {'ko': counts['ko'], 'zh': counts['zh'], 'ru': counts['ru'], 'ja': counts['ja'], 'rss': counts['rss'], 'sns': counts['sns'], 'naver': counts['naver'], 'naver_state': 네이버상태, 'naver_err': 네이버오류, 'expand': counts['expand']}
     return (items, stat)
+_GEMINI_USED = 0.0
+GEMINI_예산초 = 480
 
 def _gemini(prompt, model=보조모델):
+    global _GEMINI_USED
     url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
     err = ''
-    for attempt in range(4):
-        try:
-            r = requests.post(url, headers={'x-goog-api-key': GEMINI_KEY, 'Content-Type': 'application/json'}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=180)
+    t0 = time.time()
+    try:
+        for attempt in range(2):
+            try:
+                r = requests.post(url, headers={'x-goog-api-key': GEMINI_KEY, 'Content-Type': 'application/json'}, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=90)
+            except requests.exceptions.RequestException as ex:
+                err = str(ex)
+                time.sleep(3)
+                continue
             if r.status_code in (400, 404):
                 raise RuntimeError(f"모델 '{model}' 사용 불가({r.status_code})")
-            if r.status_code in (429, 500, 502, 503, 504):
-                err = f'{r.status_code} (한도 또는 일시 오류)'
-                print(f'Gemini[{model}] {err} - {6 * (attempt + 1)}초 후 재시도 ({attempt + 1}/4)')
-                time.sleep(6 * (attempt + 1))
+            if r.status_code == 429:
+                raise RuntimeError(f"모델 '{model}' 한도(429)")
+            if r.status_code in (500, 502, 503, 504):
+                err = f'{r.status_code} 일시 오류'
+                time.sleep(4)
                 continue
             r.raise_for_status()
-            return r.json()['candidates'][0]['content']['parts'][0]['text']
-        except requests.exceptions.RequestException as ex:
-            err = str(ex)
-            time.sleep(6 * (attempt + 1))
-    raise RuntimeError(f'Gemini[{model}] 호출 실패(재시도 후): ' + err)
+            try:
+                return r.json()['candidates'][0]['content']['parts'][0]['text']
+            except Exception:
+                raise RuntimeError(f"모델 '{model}' 응답 비정상(차단/빈 응답)")
+        raise RuntimeError(f'Gemini[{model}] 호출 실패: ' + err)
+    finally:
+        _GEMINI_USED += time.time() - t0
 _BRIEF_ENGINE = ''
 
-def gemini(prompt, models):
+def gemini(prompt, models, optional=False):
     global _BRIEF_ENGINE
+    if optional and _GEMINI_USED > GEMINI_예산초:
+        raise RuntimeError('Gemini 시간 예산 초과 → 보조 호출 생략')
     seen, chain = (set(), [])
     for m in models:
         if m and m not in seen:
@@ -1836,7 +1850,7 @@ def _translate_titles(items, state):
     if need:
         lst = '\n'.join((f'{i}. {it['title'][:160]}' for i, it in enumerate(need[:80], 1)))
         try:
-            resp = gemini("아래 기사 제목들을 한국어로 자연스럽게 번역하라. 번호를 유지해 '번호. 번역' 형식으로만 출력(설명 금지).\n\n" + lst, [보조모델] + 폴백모델목록)
+            resp = gemini("아래 기사 제목들을 한국어로 자연스럽게 번역하라. 번호를 유지해 '번호. 번역' 형식으로만 출력(설명 금지).\n\n" + lst, [보조모델] + 폴백모델목록, optional=True)
             got = {}
             for line in resp.splitlines():
                 m = re.match('\\s*(\\d+)[.)]\\s*(.+)', line)
@@ -1905,7 +1919,7 @@ def build_short(items, state):
         need = max(0, int(len(lines_now) * 0.2 + 0.999) - local_n)
         refs = {int(x) for x in re.findall('\\[(\\d+)', out)}
         local_pool = [l for i, l in enumerate(lst, 1) if i not in refs and _is_local_ru(ordered[i - 1])]
-        if need > 0 and len(local_pool) >= 2:
+        if need > 0 and len(local_pool) >= 2 and (_GEMINI_USED <= GEMINI_예산초):
             q_prompt = 프롬프트_단문.replace('{이전}', prev).replace('{목록}', '\n'.join(local_pool)) + f"\n\n[이미 작성한 줄 — 반복 금지]\n{out}\n\n위 자료는 전부 '러시아 현지' 것이다. 여기서 현지 특파원이 발로 확인할 수 있는 '현장 확인형' 항목만 {need}~{need + 3}줄 추가하라(요구사항은 '어디 가서 누구에게 무엇을 확인'처럼 구체적으로). 새로 쓸 게 없으면 정확히 NONE."
             more = make_brief(q_prompt).strip()
             if more and (not more.upper().startswith('NONE')) and (len(more) > 30):
@@ -1913,7 +1927,7 @@ def build_short(items, state):
     except Exception as ex:
         print('현장형 쿼터 처리 실패:', str(ex)[:80])
     lines_now = [l for l in out.splitlines() if l.strip()]
-    if len(lines_now) >= 4:
+    if len(lines_now) >= 4 and _GEMINI_USED <= GEMINI_예산초:
         try:
             merged = make_brief("아래 줄들 중 '같은 사건'을 다룬 줄은 하나로 합쳐라(정보가 가장 많은 한 줄만 남기고, 매체가 다르다는 이유로 따로 두지 마라). 합칠 때 [n] 번호는 남긴 줄의 것을 유지. 새 내용 추가·문장 수정 금지, 순서 유지. 결과 줄들만 출력.\n\n" + '\n'.join(lines_now)).strip()
             if merged and len([l for l in merged.splitlines() if l.strip()]) <= len(lines_now):
@@ -2244,7 +2258,7 @@ def breaking_check(new_items, state=None):
     prev = '\n'.join(prev_lines[-40:]) or '(없음)'
     prompt = 프롬프트_속보.replace('{이전}', prev) + '\n'.join(sample)
     try:
-        resp = gemini(prompt, [보조모델] + 폴백모델목록).strip()
+        resp = gemini(prompt, [보조모델] + 폴백모델목록, optional=True).strip()
     except Exception as ex:
         print('속보 판단 실패:', ex)
         return None
@@ -2267,6 +2281,14 @@ def main():
     now_kst = now_utc() + datetime.timedelta(hours=9)
     _apply_secret_config()
     state = load_state()
+    if os.environ.get('BROKEN_MAIN') == '1':
+        today = now_kst.strftime('%Y-%m-%d')
+        if state.get('broken_alerted_day') != today:
+            try:
+                _post_one(OWNER, "⚠️ 저장소의 main.py가 손상(문법 오류·잘림)돼 마지막 정상 버전으로 대신 실행 중이에요. 파일을 '업로드' 방식으로 다시 올려주세요.", silent=True)
+            except Exception:
+                pass
+            state['broken_alerted_day'] = today
     _sync_recipients(state)
     _apply_dynamic(state)
     _h(state, 'runs')
@@ -2284,7 +2306,15 @@ def main():
         print('SECRET_CONFIG 없음 → 실행 종료')
         return
     register_commands(state)
-    on_demand, report_now = handle_commands(state, long_poll=True)
+    try:
+        on_demand, report_now = handle_commands(state, long_poll=True)
+    except Exception as ex:
+        print('명령 처리 오류(무시하고 계속):', str(ex)[:120])
+        try:
+            _post_one(OWNER, '⚠️ 명령 처리 오류(보고는 계속): ' + _redact(str(ex))[:200], silent=True)
+        except Exception:
+            pass
+        on_demand, report_now = ([], False)
     for topic in on_demand:
         try:
             n = run_topic(topic, [topic], [OWNER], state=None, mark_seen=False, prefix='🙋 요청하신 ', regional=False)
@@ -2361,4 +2391,41 @@ def main():
             res = breaking_check(pending, state) if pending else None
             if res:
                 head, ref = res
-                recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.
+                recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.get('last_summary', '') or '').splitlines() if len(l) > 15] + list(state.get('alert_log', []))
+                if '급변' not in head and any((_core_sim(head, l) >= 0.5 or _stem_overlap(head, l) >= 0.5 for l in recent)):
+                    print('긴급 후보가 이미 보고된 사안 → 생략')
+                    state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
+                    res = None
+            if res:
+                head, ref = res
+                url = _shorten((ref or {}).get('link', ''), state)
+                msg = f'[긴급] {now_kst.strftime('%m-%d %H:%M')} KST\n{re.sub('<[^>]+>', '', head)}' + (f'\n{url}' if url else '') + '\n\n자세한 내용은 다음 정기 보고에서.'
+                fails, err = deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
+                if fails:
+                    _notify_fail_once(state, '긴급', err)
+                state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
+                state['alert_log'] = (state.get('alert_log', []) + [head[:120]])[-20:]
+                _h(state, 'urgent')
+                print('긴급 알림 전송(1통)')
+            else:
+                print('중대 속보 없음 - 점검만')
+        else:
+            print('정기 시각 아님 - 점검만')
+    except Exception as ex:
+        print('전송 처리 실패(다음 주기 재시도):', ex)
+        state.setdefault('health', {})['ok'] = state['health'].get('ok', 0) - 1
+    _h(state, 'ok')
+    save_state(state)
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as _ex:
+        import traceback as _tb
+        _txt = _tb.format_exc()
+        print('치명적 오류(크래시):\n' + _txt)
+        try:
+            _tail = '\n'.join(_txt.strip().splitlines()[-4:])
+            _post_one(OWNER, '⚠️ 실행 크래시 — 원인 보고\n' + _redact(_tail)[:700], silent=True)
+        except Exception:
+            pass
+        raise
