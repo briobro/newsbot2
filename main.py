@@ -1065,6 +1065,7 @@ def _gemini(prompt, model=보조모델):
     finally:
         _GEMINI_USED += time.time() - t0
 _BRIEF_ENGINE = ''
+_LAST_BLOCK_ITEMS = []
 
 def gemini(prompt, models, optional=False):
     global _BRIEF_ENGINE
@@ -1182,6 +1183,8 @@ def summarize(topic, items, prev_summary=''):
     order = ['border', 'sns', 'primary', 'foreign', 'main']
     main_cap = int(MAX_PROMPT * 0.3)
     blocks, total, main_used = ([], 0, 0)
+    global _LAST_BLOCK_ITEMS
+    _LAST_BLOCK_ITEMS = []
     for g in order:
         for it in groups[g]:
             tag = (f' ({it['_plabel']})' if it.get('_plabel') else '') + _cov_label(it)
@@ -1196,6 +1199,7 @@ def summarize(topic, items, prev_summary=''):
                 break
             blocks.append(b)
             total += len(b)
+            _LAST_BLOCK_ITEMS.append(it)
             if g == 'main':
                 main_used += len(b)
     base = 명령.replace('{주제}', topic).replace('{목록}', '\n\n'.join(blocks))
@@ -2142,6 +2146,49 @@ def build_short(items, state):
         out = out[:cut] if cut > 0 else out[:TG_LIMIT]
     return out
 
+def _cite_refs(digest, block_items, state):
+    if not block_items:
+        return re.sub('\\s*\\[[\\d,\\s、·/]+\\]', '', digest)
+
+    def _micro(it):
+        d = _domain(it.get('link', ''))
+        src = (it.get('source', '') or '').lower()
+        primary = any((d.endswith(pd) for pd in _PRIMARY_DOMAINS)) or any((k in src for k in _PRIMARY_SRC_HINTS))
+        korean_main = bool(re.search('[가-힣]', it.get('title', ''))) and (not primary)
+        return bool(it.get('social')) or _is_local_ru(it) or primary or (not korean_main)
+
+    def _name(it):
+        src = (it.get('source', '') or '').strip()
+        src = re.sub('^TG:', 'TG ', src)
+        if not src or src.lower() in ('네이버뉴스', 'google'):
+            src = _domain(_resolve(it.get('link', ''), state)) or src
+        return src[:18]
+
+    def rep(m):
+        nums = [int(x) for x in re.findall('\\d+', m.group(0))]
+        seen, labels = (set(), [])
+        for n in nums:
+            if not 0 < n <= len(block_items):
+                continue
+            it = block_items[n - 1]
+            key = _name(it)
+            if key in seen:
+                continue
+            seen.add(key)
+            lab = html.escape(key)
+            if _micro(it):
+                lang = _lang_tag(it.get('title', ''))
+                try:
+                    lab += ' ' + html.escape(_link_text(it.get('link', ''), state)) + (f' ({lang})' if lang else '')
+                except Exception:
+                    pass
+            labels.append(lab)
+            if len(labels) >= 2:
+                break
+        return ' (' + '; '.join(labels) + ')' if labels else ''
+    out = re.sub('\\s*\\[[\\d,\\s、·/]+\\]', rep, digest)
+    return out
+
 def run_digest_tiers(state, items, stat, send_all):
     seen = set(state['seen'])
     items = [it for it in items if it['link'] not in seen]
@@ -2158,6 +2205,10 @@ def run_digest_tiers(state, items, stat, send_all):
         _h(state, 'skip')
         deliver(MASTERS, 'ℹ️ 정기 보고 생략: 이전 보고 이후 새 내용 없음', silent=True)
         return 0
+    try:
+        digest = _cite_refs(digest, _LAST_BLOCK_ITEMS, state)
+    except Exception as ex:
+        print('출처 표기 변환 실패:', str(ex)[:60])
     try:
         for m in build_messages(표시제목, items, digest, stat=None, lead=None, max_pages=장문최대페이지, show_head=False, footer=False):
             deliver(_active(state, MASTERS), m)
