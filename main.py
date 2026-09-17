@@ -11,7 +11,7 @@ except Exception:
 프롬프트_속보 = '아래 새 기사 중 즉시 알릴 만큼 중대하고 새로운 것이 있으면 한 줄 요지와 근거 자료 번호 [n], 없으면 정확히 NONE 만 출력하라. 이전 알림과 같은 사안은 제외.\n[이전 알림]\n{이전}\n\n'
 프롬프트_키워드 = '아래 최신 기사들을 보고 자동 검색어를 정리하라. 기본 검색어(건드리지 말 것): {base}\n현재 자동 검색어: {auto}\n설명 없이 JSON으로만 출력: {{"add": [], "remove": []}}\n\n'
 프롬프트_소스 = "이 주제에 유용한, 실제 존재하는 공개 RSS/Atom 피드 주소를 최대 {max}개 제안하라. 정확한 URL만. RSSHub 경로는 반드시 '{rsshub}/...' 전체 주소로. 이미 사용 중 제외: {existing}\n설명 없이 JSON 문자열 배열로만 출력하라."
-추가RSS목록 = ['https://www.38north.org/feed/', 'https://www.dailynk.com/english/feed/', 'https://www.nknews.org/feed/', 'https://www.nkeconwatch.com/feed/', 'https://www.nkleadershipwatch.org/feed/', 'https://www.chosonexchange.org/our-blog?format=rss', 'https://beyondparallel.csis.org/feed/', 'https://www.armscontrolwonk.com/feed/', 'https://www.nautilus.org/feed/', 'https://www3.nhk.or.jp/rss/news/cat6.xml', 'https://www.rfa.org/arc/outboundfeeds/korean/rss', 'https://www.tongilnews.com/rss/allArticle.xml', 'https://kcnawatch.org/feed/', 'https://www.stimson.org/feed/', 'https://keia.org/feed/', 'https://sinonk.com/feed/', 'https://thediplomat.com/feed/', 'https://news.google.com/rss/search?q=site:voakorea.com&hl=ko&gl=KR&ceid=KR:ko', 'https://news.google.com/rss/search?q=site:asiapress.org&hl=ko&gl=KR&ceid=KR:ko', 'https://www.dailynk.com/feed/', 'https://news.google.com/rss/search?q=site:nkeconomy.com&hl=ko&gl=KR&ceid=KR:ko', 'https://news.google.com/rss/search?q=site:spnews.co.kr&hl=ko&gl=KR&ceid=KR:ko']
+추가RSS목록 = []
 중국검색 = True
 중국어검색어목록 = []
 러시아검색 = True
@@ -42,6 +42,9 @@ def _apply_secret_config():
     st_ = cfg.get('san_tokens')
     if isinstance(st_, list) and st_:
         g['제재토큰'] = [str(x).lower() for x in st_]
+    nt = cfg.get('nk_terms')
+    if isinstance(nt, list) and nt:
+        g['현지필터어휘'] = [str(x).lower() for x in nt]
     tv = cfg.get('topic_vocab')
     if isinstance(tv, list) and tv:
         g['주제어휘'] = [str(x) for x in tv]
@@ -68,9 +71,16 @@ def _apply_secret_config():
     b = cfg.get('border')
     if isinstance(b, list) and b:
         g['_BORDER_HINTS'] = [str(x).lower() for x in b]
+    base = cfg.get('rss')
+    if isinstance(base, list) and base:
+        g['추가RSS목록'] = [str(x) for x in base]
     extra = cfg.get('rss_extra')
     if isinstance(extra, list):
         g['추가RSS목록'] = list(g['추가RSS목록']) + [str(x) for x in extra if str(x) not in g['추가RSS목록']]
+    for key, var in [('primary_domains', '_PRIMARY_DOMAINS'), ('primary_hints', '_PRIMARY_SRC_HINTS'), ('local_domains', '_RU_LOCAL_DOMAINS')]:
+        v = cfg.get(key)
+        if isinstance(v, list) and v:
+            g[var] = tuple((str(x).lower() for x in v))
     print('비밀 설정 적용 완료 (키워드·소스 주입)')
 명령 = "아래 [자료]를 바탕으로 '{주제}' 관련 새 소식을 한국어로 간결히 요약하라. 출처 종류 표시를 참고해 검증 안 된 내용은 단정하지 마라.\n[자료]\n{목록}"
 시간범위 = 48
@@ -181,6 +191,7 @@ NORMALS = list(ENV_NORMALS)
 SUBS = _ids('TELEGRAM_CHAT_ID_SUB')
 초대코드 = ''
 주제어휘 = []
+현지필터어휘 = []
 OWNER = MASTERS[0] if MASTERS else ''
 TG_CHATS = MASTERS
 NAVER_ID = os.environ.get('NAVER_CLIENT_ID', '').strip()
@@ -192,7 +203,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'disabled_feeds': d.get('disabled_feeds', {}), 'feed_overrides': d.get('feed_overrides', {}), 'auto_tg': d.get('auto_tg', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -335,11 +346,44 @@ def read_commands(state, long_poll=False):
 
 def _clean(s):
     return ' '.join(re.sub('<[^>]+>', ' ', html.unescape(s or '')).split())
+_UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', 'Accept': 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8'}
+
+def _gdelt_items(url, limit):
+    out = []
+    try:
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        query = (q.get('query') or [''])[0]
+        if not query:
+            return out
+        r = requests.get('https://api.gdeltproject.org/api/v2/doc/doc', params={'query': query, 'mode': 'artlist', 'maxrecords': min(limit, 50), 'format': 'json', 'timespan': '2d'}, headers=_UA, timeout=25)
+        if r.status_code != 200 or not r.text.strip().startswith('{'):
+            return out
+        for a in r.json().get('articles', [])[:limit]:
+            link = a.get('url', '')
+            if not link:
+                continue
+            pub = None
+            try:
+                pub = datetime.datetime.strptime(a.get('seendate', ''), '%Y%m%dT%H%M%SZ').replace(tzinfo=datetime.timezone.utc)
+            except Exception:
+                pass
+            out.append({'title': a.get('title', ''), 'link': link, 'source': a.get('domain', 'GDELT'), 'pub': pub, 'seed': ''})
+    except Exception:
+        pass
+    return out
 
 def _rss_items(url, limit):
     out = []
     try:
-        entries = feedparser.parse(url).entries[:limit]
+        if 'gdeltproject.org' in url:
+            return _gdelt_items(url, limit)
+        try:
+            r = requests.get(url, headers=_UA, timeout=20)
+            entries = feedparser.parse(r.content).entries[:limit] if r.status_code == 200 else []
+        except Exception:
+            entries = []
+        if not entries:
+            entries = feedparser.parse(url).entries[:limit]
     except Exception:
         return out
     for e in entries:
@@ -568,8 +612,22 @@ def _maybe_learn_sources(state):
     alive, dropped = ([], [])
     for u in auto:
         (alive if _validate_feed(u) > 0 else dropped).append(u)
-    added = []
-    for u in discover_sources(fixed | set(alive)):
+    added, added_tg = ([], [])
+    auto_tg = list(state.get('auto_tg', []))
+    for u in discover_sources(fixed | set(alive) | {f'tg:{c}' for c in auto_tg}):
+        tm = re.search('(?:t\\.me/(?:s/)?|^tg:|^@)([A-Za-z][A-Za-z0-9_]{3,})', u)
+        if tm:
+            ch = tm.group(1)
+            if ch in 텔레채널 or ch in auto_tg or len(auto_tg) >= 20:
+                continue
+            try:
+                posts = fetch_telegram(ch, 8)
+            except Exception:
+                posts = []
+            if len(posts) >= 3:
+                auto_tg.append(ch)
+                added_tg.append(ch)
+            continue
         if u in fixed or u in alive:
             continue
         if _validate_feed(u) > 0:
@@ -577,14 +635,17 @@ def _maybe_learn_sources(state):
             added.append(u)
             if len(alive) >= 자동소스최대:
                 break
+    state['auto_tg'] = auto_tg[-20:]
     state['auto_sources'] = alive[-자동소스최대:]
-    if added or dropped:
-        print(f'소스 자동 추가 {len(added)}건 / 정리 {len(dropped)}건')
-        _h(state, 'src_added', len(added))
+    if added or dropped or added_tg:
+        print(f'소스 자동 추가 {len(added)}건 / 정리 {len(dropped)}건 / 텔레채널 {len(added_tg)}건')
+        _h(state, 'src_added', len(added) + len(added_tg))
         _h(state, 'src_dropped', len(dropped))
         parts = []
         if added:
             parts.append('➕ 검증 통과한 새 소스:\n' + '\n'.join(added))
+        if added_tg:
+            parts.append('➕ 검증 통과한 텔레그램 채널:\n' + '\n'.join((f't.me/s/{c}' for c in added_tg)))
         if dropped:
             parts.append('➖ 응답 없어 정리한 소스:\n' + '\n'.join(dropped))
         try:
@@ -792,6 +853,83 @@ def fetch_weibo(uid=None, keyword=None, limit=10):
         if _WB_FAILS <= 1:
             print('웨이보 수집 실패(차단/비JSON) — 이번 실행은 건너뜀:', str(ex)[:60])
     return out
+
+def _nk_related(it):
+    if not 현지필터어휘:
+        return True
+    blob = ((it.get('title', '') or '') + ' ' + (it.get('seed', '') or '')).lower()
+    return any((t in blob for t in 현지필터어휘))
+_DYN = {'disabled': set(), 'overrides': {}, 'auto_tg': []}
+
+def _apply_dynamic(state):
+    _DYN['disabled'] = set((state or {}).get('disabled_feeds', {}).keys())
+    _DYN['overrides'] = dict((state or {}).get('feed_overrides', {}))
+    _DYN['auto_tg'] = list((state or {}).get('auto_tg', []))
+
+def _autodiscover_feed(url):
+    try:
+        pr = urllib.parse.urlparse(url)
+        root = f'{pr.scheme or 'https'}://{pr.netloc}'
+    except Exception:
+        return ''
+    cands = []
+    try:
+        r = requests.get(root, headers=_UA, timeout=15)
+        for m in re.finditer('<link[^>]+type=["\\\']application/(?:rss|atom)\\+xml["\\\'][^>]*>', r.text, re.I):
+            hm = re.search('href=["\\\']([^"\\\']+)', m.group(0))
+            if hm:
+                cands.append(urllib.parse.urljoin(root + '/', hm.group(1)))
+    except Exception:
+        pass
+    for p in ('/feed/', '/rss/', '/rss.xml', '/feed.xml', '/rss/all/', '/?feed=rss2', '/atom.xml', '/index.xml', '/feed/rss/'):
+        cands.append(root + p)
+    seen = set()
+    for c in cands:
+        if c in seen or c == url:
+            continue
+        seen.add(c)
+        if _validate_feed(c) > 0:
+            return c
+    return ''
+
+def _maintain_feeds(state, now_kst):
+    zero = state.get('health', {}).get('zero', {})
+    dis = dict(state.get('disabled_feeds', {}))
+    ovr = dict(state.get('feed_overrides', {}))
+    notes = []
+    for name, n in list(zero.items()):
+        if n != 8 or name in dis or (not name.startswith('http')):
+            continue
+        fixed = _autodiscover_feed(ovr.get(name, name))
+        if fixed:
+            ovr[name] = fixed
+            notes.append(f'🔧 피드 자동 수리: {_domain(name)} → {fixed}')
+            zero[name] = 0
+        else:
+            dis[name] = now_kst.strftime('%Y-%m-%d')
+            notes.append(f'⏸ 피드 비활성(8회 연속 0건): {name[:70]}')
+    for name, n in list(zero.items()):
+        if n == 12 and name.startswith('tg:'):
+            notes.append(f'⚠ 텔레그램 채널 12회 연속 0건: {name} (닫혔거나 비공개 전환 가능)')
+    state['disabled_feeds'] = dis
+    state['feed_overrides'] = ovr
+    if notes:
+        _h(state, 'auto_fix', len(notes))
+        deliver(MASTERS, '\n'.join(notes), silent=True)
+
+def _weekly_reprobe(state):
+    dis = dict(state.get('disabled_feeds', {}))
+    revived = []
+    for name in list(dis.keys()):
+        u = state.get('feed_overrides', {}).get(name, name)
+        fixed = u if _validate_feed(u) > 0 else _autodiscover_feed(u)
+        if fixed:
+            if fixed != name:
+                state.setdefault('feed_overrides', {})[name] = fixed
+            dis.pop(name, None)
+            revived.append(name)
+    state['disabled_feeds'] = dis
+    return revived
 _FEED_STATS = {}
 
 def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
@@ -803,10 +941,13 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
         jobs.append(('ko', lambda t=t: search_news(t, _lang_of(t), days, 출처당최대)))
     if regional:
         for rss in 추가RSS목록 + list(auto_feeds or []):
-            jobs.append(('rss', rss, lambda rss=rss: _rss_items(rss, 출처당최대)))
+            if rss in _DYN['disabled']:
+                continue
+            real = _DYN['overrides'].get(rss, rss)
+            jobs.append(('rss', rss, lambda real=real: _rss_items(real, 출처당최대)))
         for s in 소셜RSS목록:
             jobs.append(('sns', s, lambda s=s: _rss_items(s, 출처당최대)))
-        for ch in 텔레채널:
+        for ch in list(dict.fromkeys(list(텔레채널) + _DYN['auto_tg'])):
             jobs.append(('sns', f'tg:{ch}', lambda ch=ch: fetch_telegram(ch, 출처당최대)))
         for uid in 웨이보계정:
             jobs.append(('sns', f'wb:{uid}', lambda uid=uid: fetch_weibo(uid=uid, limit=출처당최대)))
@@ -827,6 +968,8 @@ def fetch_items(terms, regional=True, bodies=True, deep=True, auto_feeds=None):
         bucket, lst = (res[0], res[-1])
         if len(res) == 3:
             _FEED_STATS[res[1]] = len(lst)
+        if bucket in ('sns', 'rss'):
+            lst = [it for it in lst if not (it.get('social') or _is_local_ru(it)) or _nk_related(it)]
         counts[bucket] += len(lst)
         if bucket == 'sns':
             for it in lst:
@@ -933,8 +1076,8 @@ _BORDER_HINTS = []
 def _is_border(it):
     blob = (it.get('title', '') + ' ' + it.get('seed', '') + ' ' + (it.get('body', '') or '')).lower()
     return any((h in blob for h in _BORDER_HINTS))
-_PRIMARY_DOMAINS = ('rfa.org', 'kcnawatch.org', '38north.org', 'dailynk.com', 'nknews.org', 'nkeconwatch.com', 'nkleadershipwatch.org', 'beyondparallel.csis.org', 'armscontrolwonk.com', 'nautilus.org', 'sinonk.com', 'stimson.org', 'keia.org', 'thediplomat.com', 'tongilnews.com', 'primamedia.ru', 'chosonexchange.org', 'asiapress.org')
-_PRIMARY_SRC_HINTS = ('rfa', '자유아시아', 'daily nk', '데일리nk', 'nk news', '38 north', 'kcna', '조선중앙', 'beyond parallel', 'stimson', 'diplomat', '통일뉴스', 'nautilus', 'nk pro', '아시아프레스', 'rimjin', '임진강')
+_PRIMARY_DOMAINS = ()
+_PRIMARY_SRC_HINTS = ()
 
 def _domain(u):
     try:
@@ -1652,7 +1795,7 @@ def _core_sim(a, b):
     if tok(a0) & tok(b0) and sim >= 0.25:
         return 1.0
     return sim
-_RU_LOCAL_DOMAINS = ('primamedia.ru', 'dvnovosti.ru', 'newsvl.ru', 'vostokmedia.com', 'khabarovsk', 'amur', 'vl.ru', 'dvhab', 'primorye')
+_RU_LOCAL_DOMAINS = ()
 
 def _is_local_ru(it):
     t = it.get('title', '') or ''
@@ -1673,6 +1816,44 @@ def _link_text(link, state=None):
         return _shorten(u, state)
     return disp
 
+def _lang_tag(text):
+    t = text or ''
+    if re.search('[가-힣]', t):
+        return ''
+    if re.search('[\\u0400-\\u04ff]', t):
+        return '러시아어'
+    if re.search('[\\u3040-\\u30ff]', t):
+        return '일본어'
+    if re.search('[\\u4e00-\\u9fff]', t):
+        return '중국어'
+    if re.search('[A-Za-z]{3,}', t):
+        return '영어'
+    return ''
+
+def _translate_titles(items, state):
+    cache = state.setdefault('title_ko', {}) if state is not None else {}
+    need = [it for it in items if _lang_tag(it.get('title', '')) and it.get('link') and (it['link'] not in cache)]
+    if need:
+        lst = '\n'.join((f'{i}. {it['title'][:160]}' for i, it in enumerate(need[:80], 1)))
+        try:
+            resp = gemini("아래 기사 제목들을 한국어로 자연스럽게 번역하라. 번호를 유지해 '번호. 번역' 형식으로만 출력(설명 금지).\n\n" + lst, [보조모델] + 폴백모델목록)
+            got = {}
+            for line in resp.splitlines():
+                m = re.match('\\s*(\\d+)[.)]\\s*(.+)', line)
+                if m:
+                    got[int(m.group(1))] = m.group(2).strip()
+            for i, it in enumerate(need[:80], 1):
+                if got.get(i):
+                    cache[it['link']] = got[i][:160]
+        except Exception as ex:
+            print('제목 번역 실패:', str(ex)[:60])
+        if len(cache) > 500:
+            for k in list(cache)[:150]:
+                cache.pop(k, None)
+        if state is not None:
+            state['title_ko'] = cache
+    return {it['link']: cache.get(it['link'], '') for it in items if it.get('link')}
+
 def build_short(items, state):
     items = _coverage_tags(items)
 
@@ -1688,9 +1869,13 @@ def build_short(items, state):
         cnt, ko = it.get('_cov', (9, True))
         return (0 if _micro(it) else 1, 0 if cnt <= 2 and (not ko) else 1, 0 if _is_korean_item(it) else 1)
     ordered = sorted(items, key=_rank)[:200]
+    ko_map = _translate_titles(ordered, state)
     lst = []
     for i, it in enumerate(ordered, 1):
         tag = '(한)' if _is_korean_item(it) else ''
+        if ko_map.get(it.get('link', '')):
+            it = dict(it)
+            it['title'] = f'{it['title']} → 한국어: {ko_map[it['link']]}'
         if _is_local_ru(it):
             tag += '(러시아 현지)'
         if _micro(it):
@@ -1750,7 +1935,7 @@ def build_short(items, state):
         pass
     uniq = []
     for l in out.splitlines():
-        if l.strip() and any((_core_sim(l, u) >= 0.6 for u in uniq)):
+        if l.strip() and any((_core_sim(l, u) >= 0.6 or _stem_overlap(l, u) >= 0.5 for u in uniq)):
             continue
         uniq.append(l)
     out = '\n'.join(uniq)
@@ -1760,7 +1945,7 @@ def build_short(items, state):
         if len(line.strip()) < 15:
             kept.append(line)
             continue
-        dup = any((_core_sim(line, pl) >= 0.7 for pl in prev_lines))
+        dup = any((_core_sim(line, pl) >= 0.6 or _stem_overlap(line, pl) >= 0.55 for pl in prev_lines))
         if dup and '갱신' not in line and ('급변' not in line):
             continue
         kept.append(line)
@@ -1803,12 +1988,14 @@ def build_short(items, state):
             it = ordered[int(m.group(1)) - 1]
             if not _is_micro(it):
                 return ''
-            line_txt = out[max(0, m.start() - 160):m.start()]
+            line_txt = out[max(0, m.start() - 200):m.start()]
             tt = it.get('title', '') or ''
-            if re.search('[가-힣]', tt):
-                tks = {w for w in re.findall('[가-힣]{2,}|\\d+', tt)}
-                if tks and (not any((w in line_txt for w in tks))):
+            ko_t = ko_map.get(it.get('link', ''), '') if re.search('[가-힣]', tt) is None else tt
+            if ko_t:
+                if _stem_overlap(line_txt, ko_t) < 0.3 and (not any((w in line_txt for w in re.findall('[가-힣]{2,}|\\d{2,}', ko_t)))):
                     return ''
+            elif _lang_tag(tt):
+                return ''
             link = it.get('link', '')
             if not _direct(link):
                 best = None
@@ -1820,9 +2007,11 @@ def build_short(items, state):
                     link = best['link']
             extra = ''
             t = it.get('title', '') or ''
-            if not re.search('[가-힣]', t) and re.search('[\\u0400-\\u04ff\\u4e00-\\u9fff\\u3040-\\u30ff]', t):
-                extra = ' (원문: ' + t[:60].strip() + ')'
-            return extra + ' ' + _link_text(link, state)
+            lang = _lang_tag(t)
+            if lang and lang != '영어':
+                ko_t = ko_map.get(it.get('link', ''), '')
+                extra = ' (원문: ' + (ko_t or t)[:70].strip() + ')'
+            return extra + ' ' + _link_text(link, state) + (f' ({lang})' if lang else '')
         except Exception:
             return ''
 
@@ -1841,8 +2030,11 @@ def build_short(items, state):
     out = re.sub('^([\\s•○●■▪·\\-]*)[①-⑳㉑-㉟⑴-⒇]\\s*', '\\1', out, flags=re.M)
     out = re.sub('^([\\s•○●■▪·\\-]*)\\d{1,2}[.)]\\s+', '\\1', out, flags=re.M)
     out = re.sub('\\[(\\d+(?:\\s*[,、·/]\\s*\\d+)+)\\]', _rep_group, out)
-    out = re.sub('[ \\t]*\\[(\\d+)\\]', _rep, out)
+    out = re.sub('[ \\t]*\\[\\s*(\\d+)\\s*\\]', _rep, out)
     out = re.sub('\\[[\\d,、·/\\s]*\\]', '', out)
+    out = re.sub('\\[\\s*((?:https?://)?[\\w.-]+\\.[a-z]{2,}/\\S*)\\s*\\]', '\\1', out)
+    out = re.sub('[ \\t]*\\[\\s*\\.?\\s*$', '', out, flags=re.M)
+    out = re.sub('^\\s*\\]\\s*', '', out, flags=re.M)
     out = out.replace('★', '')
     out = re.sub('\\(\\s*(러시아\\s*현지|한|보도\\s*\\d+곳[^)]*|국내\\s*미보도|선점[^)]*)\\s*\\)', '', out)
     global _OUTLET_NAMES
@@ -1863,6 +2055,11 @@ def build_short(items, state):
     def _drop_instr(l):
         um = re.search('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)', l)
         body, tail = (l[:um.start()], l[um.start():]) if um else (l, '')
+        arrow = ''
+        am = re.search('\\s*→.*$', body)
+        if am:
+            arrow = am.group(0)
+            body = body[:am.start()]
         parens = re.findall('\\([^()]*미확인[^()]*\\)', body)
         core = re.sub('\\([^()]*미확인[^()]*\\)', '\x00P\x00', body)
         core = re.sub('\\([^()]*(?:필요|봐야|체크|요망|확인)[^()]*\\)', '', core)
@@ -1875,14 +2072,14 @@ def build_short(items, state):
         for p_ in parens[kept_ph:]:
             core = core.rstrip(' ,.') + p_
         core = core.replace('\x00P\x00', '')
-        return (core.rstrip(' ,.') + (' ' + tail if tail else '')).rstrip()
+        return (core.rstrip(' ,.') + arrow + (' ' + tail if tail else '')).rstrip()
     out = '\n'.join((_drop_instr(l) for l in out.splitlines()))
     cleaned = []
     for l in out.splitlines():
         um = re.search('(?:https?://\\S+|(?<![\\w/])[\\w.-]+\\.[a-z]{2,}/\\S+)', l)
         body, tail = (l[:um.start()], l[um.start():]) if um else (l, '')
-        parts = re.split('\\s*[:：]\\s*', body, maxsplit=1)
-        if len(parts) == 2 and re.search('(필요|확인|파악|추적|점검|봐야|체크|요망|취재|분석)', parts[1]):
+        parts = re.split('(?<!취재)(?<!취재 )\\s*[:：]\\s*', body, maxsplit=1)
+        if len(parts) == 2 and '→' not in parts[0] and re.search('(필요|확인|파악|추적|점검|봐야|체크|요망|분석)', parts[1]) and ('→' not in parts[1]):
             body = parts[0].rstrip(' ,.-')
         body = re.sub('\\s+-\\s+[^-(]*?(필요|확인|파악|추적|점검|봐야|체크|요망)[^-(]*$', '', body)
         cleaned.append((body.rstrip() + (' ' + tail if tail else '')).rstrip())
@@ -1895,6 +2092,8 @@ def build_short(items, state):
         if not l.strip():
             continue
         low = l.lower()
+        if len(re.findall('[가-힣]', re.sub('\\([^)]*\\)', '', l))) < 6:
+            continue
         if re.search('연관성[^\\n]{0,12}(불확실|미상|불명|낮|없)', l):
             continue
         fact = re.split('향후|전망|가능성|우려', low, maxsplit=1)[0]
@@ -1908,7 +2107,9 @@ def build_short(items, state):
     for l in out.splitlines():
         urls = url_re.findall(l)
         if urls:
-            l = url_re.sub('', l).rstrip(' ,.:;-') + ' ' + urls[0]
+            lt = re.search('\\((러시아어|중국어|일본어|영어)\\)', l)
+            l = re.sub('\\s*\\((러시아어|중국어|일본어|영어)\\)', '', l)
+            l = url_re.sub('', l).rstrip(' ,.:;-') + ' ' + urls[0] + (' ' + lt.group(0) if lt else '')
         fixed.append(l)
     out = '\n'.join(fixed)
     out = '\n'.join((l for l in out.splitlines() if not re.match('^\\s*[\\[【#]', l) and '미시 신호' not in l and ('취재·조사' not in l)))
@@ -1990,8 +2191,9 @@ def _maybe_weekly_health(state, now_kst):
     if now_kst.weekday() != 0 or h.get('sent_week') == wk:
         return
     runs, ok = (h.get('runs', 0), h.get('ok', 0))
-    zero = {k: v for k, v in h.get('zero', {}).items() if v >= 6}
-    lines = [f'📋 주간 점검 ({wk})', f'실행 {runs}회 · 정상 종료 {ok}회 · 비정상 {max(0, runs - ok)}회', f'보고: 장문 {h.get('long', 0)} · 단문 {h.get('short', 0)} · 긴급 {h.get('urgent', 0)} · 미발송(중복/없음) {h.get('skip', 0)}', f'분석 모델: Pro {h.get('pro', 0)}회 · Flash 등 강등 {h.get('flash', 0)}회' + (' ⚠ 한도 자주 소진' if h.get('flash', 0) > h.get('pro', 0) else ''), f'소스: 자동 추가 {h.get('src_added', 0)} · 정리 {h.get('src_dropped', 0)} · 자동 검색어 +{h.get('kw_added', 0)}/-{h.get('kw_removed', 0)}']
+    revived = _weekly_reprobe(state)
+    zero = {k: v for k, v in h.get('zero', {}).items() if v >= 6 and k not in state.get('disabled_feeds', {})}
+    lines = [f'📋 주간 점검 ({wk})', f'실행 {runs}회 · 정상 종료 {ok}회 · 비정상 {max(0, runs - ok)}회', f'보고: 장문 {h.get('long', 0)} · 단문 {h.get('short', 0)} · 긴급 {h.get('urgent', 0)} · 미발송(중복/없음) {h.get('skip', 0)}', f'분석 모델: Pro {h.get('pro', 0)}회 · Flash 등 강등 {h.get('flash', 0)}회' + (' ⚠ 한도 자주 소진' if h.get('flash', 0) > h.get('pro', 0) else ''), f'소스: 자동 추가 {h.get('src_added', 0)} · 정리 {h.get('src_dropped', 0)} · 자동 검색어 +{h.get('kw_added', 0)}/-{h.get('kw_removed', 0)}', f'자동 유지보수: 수리/비활성 {h.get('auto_fix', 0)}건 · 비활성 중 {len(state.get('disabled_feeds', {}))}개 · 이번 주 복구 {len(revived)}개 · 자동 텔레채널 {len(state.get('auto_tg', []))}개']
     if zero:
         lines.append('⚠ 계속 0건인 소스(점검 필요):')
         for k, v in sorted(zero.items(), key=lambda x: -x[1])[:8]:
@@ -2066,6 +2268,7 @@ def main():
     _apply_secret_config()
     state = load_state()
     _sync_recipients(state)
+    _apply_dynamic(state)
     _h(state, 'runs')
     _ensure_polling(state)
     _maybe_weekly_health(state, now_kst)
@@ -2132,6 +2335,10 @@ def main():
     state['last_search_ts'] = now_utc().isoformat()
     for _name, _cnt in list(_FEED_STATS.items()):
         _h_feed(state, _name, _cnt)
+    try:
+        _maintain_feeds(state, now_kst)
+    except Exception as ex:
+        print('피드 유지보수 오류:', str(ex)[:80])
     if is_digest:
         _maybe_learn_keywords(state, items)
         _maybe_learn_sources(state)
@@ -2154,30 +2361,4 @@ def main():
             res = breaking_check(pending, state) if pending else None
             if res:
                 head, ref = res
-                recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.get('last_summary', '') or '').splitlines() if len(l) > 15] + list(state.get('alert_log', []))
-                if '급변' not in head and any((_core_sim(head, l) >= 0.5 or _stem_overlap(head, l) >= 0.5 for l in recent)):
-                    print('긴급 후보가 이미 보고된 사안 → 생략')
-                    state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
-                    res = None
-            if res:
-                head, ref = res
-                url = _shorten((ref or {}).get('link', ''), state)
-                msg = f'[긴급] {now_kst.strftime('%m-%d %H:%M')} KST\n{re.sub('<[^>]+>', '', head)}' + (f'\n{url}' if url else '') + '\n\n자세한 내용은 다음 정기 보고에서.'
-                fails, err = deliver(MASTERS + NORMALS + SUBS, msg[:TG_LIMIT], plain=True, urgent=True, token=TG_TOKEN_SHORT or None)
-                if fails:
-                    _notify_fail_once(state, '긴급', err)
-                state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
-                state['alert_log'] = (state.get('alert_log', []) + [head[:120]])[-20:]
-                _h(state, 'urgent')
-                print('긴급 알림 전송(1통)')
-            else:
-                print('중대 속보 없음 - 점검만')
-        else:
-            print('정기 시각 아님 - 점검만')
-    except Exception as ex:
-        print('전송 처리 실패(다음 주기 재시도):', ex)
-        state.setdefault('health', {})['ok'] = state['health'].get('ok', 0) - 1
-    _h(state, 'ok')
-    save_state(state)
-if __name__ == '__main__':
-    main()
+                recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.
