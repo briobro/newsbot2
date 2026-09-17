@@ -29,6 +29,20 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Integrity check (fallback to last good main.py)
+        run: |
+          if python -m py_compile main.py; then
+            cp main.py main_last_good.py
+            echo "BROKEN_MAIN=0" >> $GITHUB_ENV
+          elif [ -f main_last_good.py ]; then
+            echo "::warning::main.py has a syntax error (truncated upload?) - running last good version"
+            cp main_last_good.py main.py
+            echo "BROKEN_MAIN=1" >> $GITHUB_ENV
+          else
+            echo "::error::main.py has a syntax error and no fallback exists"
+            exit 1
+          fi
+
       - name: Run digest
         env:
           TELEGRAM_TOKEN:           ${{ secrets.TELEGRAM_TOKEN }}
@@ -44,11 +58,13 @@ jobs:
           FORCE_DIGEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python main.py
 
-      - name: Save seen state
+      - name: Save state
+        if: always()
         run: |
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
-          git add seen.json
+          git checkout -- main.py 2>/dev/null || true
+          git add seen.json main_last_good.py 2>/dev/null || true
           git commit -m "update state [skip ci]" || echo "변경 없음"
           git pull --rebase --autostash origin main || true
           git push || true
