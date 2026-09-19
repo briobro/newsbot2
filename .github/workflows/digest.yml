@@ -2,9 +2,9 @@ name: news-digest
 
 on:
   schedule:
-    - cron: "0,5,10,15 23 * * 0-4"
-    - cron: "0,5,10,15 5 * * 1-5"
-    - cron: "0,5,10,15 11 * * 1-5"
+    - cron: "0,5,10,15 23 * * *"
+    - cron: "0,5,10,15 5 * * *"
+    - cron: "0,5,10,15 11 * * *"
     - cron: "0 * * * *"
   workflow_dispatch: {}
 
