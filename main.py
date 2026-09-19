@@ -93,8 +93,8 @@ def _apply_secret_config():
 장문최대페이지 = 3
 단문사람체 = True
 마스터슬롯 = []
-주말발송 = False
-공휴일휴무 = True
+주말발송 = True
+공휴일휴무 = False
 양력공휴일 = ['0101', '0301', '0505', '0606', '0815', '1003', '1009', '1225']
 공휴일자동 = True
 _HOLI_CACHE = set()
@@ -107,7 +107,7 @@ _HOLI_CACHE = set()
 검색간격시간 = 0.5
 속보허용 = True
 심야속보 = True
-보고안내 = '평일(공휴일 제외) 08:00·14:00·20:00 KST · 중대 속보는 즉시'
+보고안내 = '매일 08:00·14:00·20:00 KST · 중대 속보는 즉시'
 키워드자동최신화 = True
 자동키워드최대 = 20
 키워드갱신주기시간 = 24
@@ -203,7 +203,7 @@ def now_utc():
 def _base_state(d):
     if isinstance(d, list):
         d = {'seen': d}
-    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'disabled_feeds': d.get('disabled_feeds', {}), 'feed_overrides': d.get('feed_overrides', {}), 'auto_tg': d.get('auto_tg', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'broken_alerted_day': d.get('broken_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
+    return {'seen': d.get('seen', []), 'paused_until': d.get('paused_until', ''), 'last_update_id': d.get('last_update_id', 0), 'user_mutes': d.get('user_mutes', {}), 'holiday_cache': d.get('holiday_cache', {}), 'webhook_cleared': d.get('webhook_cleared', False), 'conflict_alerted_day': d.get('conflict_alerted_day', ''), 'last_summary': d.get('last_summary', ''), 'last_short': d.get('last_short', ''), 'short_log': d.get('short_log', []), 'alert_log': d.get('alert_log', []), 'alert_day': d.get('alert_day', {}), 'health': d.get('health', {}), 'dyn_normals': d.get('dyn_normals', []), 'url_cache': d.get('url_cache', {}), 'url_res': d.get('url_res', {}), 'unreach_alerted': d.get('unreach_alerted', []), 'disabled_feeds': d.get('disabled_feeds', {}), 'feed_overrides': d.get('feed_overrides', {}), 'auto_tg': d.get('auto_tg', []), 'pending_subs': d.get('pending_subs', {}), 'recip_names': d.get('recip_names', {}), 'sub_notified': d.get('sub_notified', {}), 'last_search_ts': d.get('last_search_ts', ''), 'last_digest_ts': d.get('last_digest_ts', ''), 'last_digest_slot': d.get('last_digest_slot', ''), 'last_slot_all': d.get('last_slot_all', ''), 'last_slot_master': d.get('last_slot_master', ''), 'alerted': d.get('alerted', []), 'auto_keywords': d.get('auto_keywords', []), 'auto_kw_updated': d.get('auto_kw_updated', ''), 'auto_sources': d.get('auto_sources', []), 'auto_src_updated': d.get('auto_src_updated', ''), 'sanctions_seen': d.get('sanctions_seen', []), 'sanctions_checked': d.get('sanctions_checked', ''), 'comtrade_checked': d.get('comtrade_checked', ''), 'quake_seen': d.get('quake_seen', []), 'quake_checked': d.get('quake_checked', ''), 'cfg_alerted_day': d.get('cfg_alerted_day', ''), 'broken_alerted_day': d.get('broken_alerted_day', ''), 'bot_cmds_v': d.get('bot_cmds_v', '')}
 
 def load_state():
     try:
@@ -1903,7 +1903,7 @@ def build_short(items, state):
         lst.append(f'[{i}] {it.get('title', '')}{snip} {tag}{_cov_label(it)} ({it.get('source', '')})')
     hist = state.get('short_log', [])[-10:]
     prev = '\n---\n'.join(hist) if hist else '(없음)'
-    alerts = '\n'.join(state.get('alert_log', [])[-10:])
+    alerts = '\n'.join((x.get('h', '') if isinstance(x, dict) else str(x) for x in state.get('alert_log', [])[-10:]))
     if alerts:
         prev += '\n[이미 보낸 긴급 알림]\n' + alerts
     base_prompt = 프롬프트_단문.replace('{이전}', prev).replace('{목록}', '\n'.join(lst))
@@ -2303,7 +2303,7 @@ def breaking_check(new_items, state=None):
         if it.get('seed'):
             s += ' — ' + it['seed'][:80]
         sample.append(f'[{i}] {s}')
-    prev_lines = list((state or {}).get('alert_log', [])[-10:])
+    prev_lines = [x.get('h', '') if isinstance(x, dict) else str(x) for x in (state or {}).get('alert_log', [])[-10:]]
     for h in (state or {}).get('short_log', [])[-4:]:
         prev_lines += [l for l in h.splitlines() if len(l) > 15][:15]
     prev = '\n'.join(prev_lines[-40:]) or '(없음)'
@@ -2442,9 +2442,38 @@ def main():
             res = breaking_check(pending, state) if pending else None
             if res:
                 head, ref = res
-                recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.get('last_summary', '') or '').splitlines() if len(l) > 15] + list(state.get('alert_log', []))
-                if '급변' not in head and any((_core_sim(head, l) >= 0.5 or _stem_overlap(head, l) >= 0.5 for l in recent)):
-                    print('긴급 후보가 이미 보고된 사안 → 생략')
+                skip = ''
+                if re.search('(가능성|시사|양상|전망|관측|보도됨|드러나|보인다|것으로 알려|우려|주장|시찰|담화|논평|해설|인터뷰|발언|지시|강조|촉구|경고)', head) and (not re.search('(발사|핵실험|교전|충돌|사망|숙청|체포|억류|개통|폐쇄|서명|합의|정상회담.*(개최|열)|폭발|침몰|격추)', head)):
+                    skip = '추측·해설성'
+                today = now_kst.strftime('%Y-%m-%d')
+                dc = state.get('alert_day', {})
+                if not skip and dc.get('d') == today and (dc.get('n', 0) >= 3):
+                    skip = '하루 상한(3건)'
+                if not skip:
+                    recent = [l for h in state.get('short_log', [])[-10:] for l in h.splitlines() if len(l) > 15] + [l for l in (state.get('last_summary', '') or '').splitlines() if len(l) > 15]
+                    logs = state.get('alert_log', [])
+
+                    def _lt(x):
+                        return x.get('t', '') if isinstance(x, dict) else ''
+
+                    def _lh(x):
+                        return x.get('h', '') if isinstance(x, dict) else str(x)
+                    same_recent = any((_core_sim(head, l) >= 0.45 or _stem_overlap(head, l) >= 0.35 for l in recent))
+                    same_alert = [x for x in logs if _core_sim(head, _lh(x)) >= 0.45 or _stem_overlap(head, _lh(x)) >= 0.35]
+                    if same_alert or same_recent:
+                        allow = False
+                        if '급변' in head and same_alert:
+                            try:
+                                last_t = max((datetime.datetime.fromisoformat(_lt(x)) for x in same_alert if _lt(x)))
+                                hrs = (now_utc() - last_t).total_seconds() / 3600
+                            except Exception:
+                                hrs = 0
+                            new_tok = {w for w in re.findall('\\d+[가-힣%]*|[가-힣]{2,}', head)} - {w for x in same_alert for w in re.findall('\\d+[가-힣%]*|[가-힣]{2,}', _lh(x))}
+                            allow = hrs >= 24 and any((re.match('\\d', w) for w in new_tok))
+                        if not allow:
+                            skip = '이미 보고된 사안'
+                if skip:
+                    print(f'긴급 후보 생략({skip}): {head[:60]}')
                     state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
                     res = None
             if res:
@@ -2455,7 +2484,10 @@ def main():
                 if fails:
                     _notify_fail_once(state, '긴급', err)
                 state['alerted'] = (list(alerted) + [it['link'] for it in pending])[-800:]
-                state['alert_log'] = (state.get('alert_log', []) + [head[:120]])[-20:]
+                state['alert_log'] = (state.get('alert_log', []) + [{'t': now_utc().isoformat(), 'h': head[:160]}])[-30:]
+                dc = state.get('alert_day', {})
+                today = now_kst.strftime('%Y-%m-%d')
+                state['alert_day'] = {'d': today, 'n': dc.get('n', 0) + 1 if dc.get('d') == today else 1}
                 _h(state, 'urgent')
                 print('긴급 알림 전송(1통)')
             else:
